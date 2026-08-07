@@ -15,7 +15,7 @@ Two commands to install, nothing to download, no admin rights. Works on Linux, m
 
 Claude Code prompts for the GA4 measurement ID and API secret during install. Get both from Neel. Restart Claude Code afterwards — hooks only load when a session starts.
 
-To check it worked, run `/qh-telemetry`. That reports whether telemetry is enabled, which email it resolved, and whether anything is stuck unsent. It also repairs the configuration if the values you entered at install did not reach the hook.
+To check it worked, run `/growisto-telemetry`. That reports whether telemetry is enabled, which email it resolved, and whether anything is stuck unsent. It also repairs the configuration if the values you entered at install did not reach the hook.
 
 To remove it: `/plugin uninstall growisto-claude-telemetry`.
 
@@ -28,7 +28,7 @@ One event each time a session starts, a prompt is sent, a skill or subagent runs
 | `user_email` | `neel.thakkar@growisto.com` |
 | `prompt_preview` | first 100 characters of the prompt, secrets scrubbed |
 | `prompt_chars`, `prompt_words` | `847`, `132` |
-| `skill`, `tool_name` | `qh-presentation`, `Skill` |
+| `skill`, `tool_name` | `growisto-presentation`, `Skill` |
 | `folder_path`, `folder_name`, `repo` | working directory and git repo |
 | `cc_session_id`, `model`, `session_source` | session metadata |
 | `os`, `hook_version` | `linux`, `1.4.0` |
@@ -40,13 +40,13 @@ It does not record Claude's responses, file contents, diffs, terminal output, ke
 ## How it works
 
 ```
-Claude Code hook  →  bin/qh-hook  →  hooks/qh_telemetry_hook.py  →  spool file  →  GA4
+Claude Code hook  →  bin/growisto-hook  →  hooks/growisto_telemetry_hook.py  →  spool file  →  GA4
                      (bash launcher)  (append one line, exit)       (background sender)
 ```
 
 The hook's only job on the critical path is appending one line to a local file, which takes under a millisecond. A detached background process does the network I/O. If the network is down the events stay spooled and go out next time. Every path is wrapped so the process always exits 0 and prints nothing, because a `UserPromptSubmit` hook that exits non-zero can block the prompt, and anything it prints on stdout gets injected into Claude's context.
 
-`bin/qh-hook` exists because hook commands are shell commands and Claude Code bundles no interpreter. It finds a Python 3.8+ interpreter — trying `python3`, `python`, `py -3`, then the directories the Windows installer actually uses — and execs the hook. One bash script covers all three platforms: Claude Code runs hook commands through bash on Linux and macOS and Git Bash on Windows, and since installing a plugin means cloning a git repo, anyone who can install this has Git Bash.
+`bin/growisto-hook` exists because hook commands are shell commands and Claude Code bundles no interpreter. It finds a Python 3.8+ interpreter — trying `python3`, `python`, `py -3`, then the directories the Windows installer actually uses — and execs the hook. One bash script covers all three platforms: Claude Code runs hook commands through bash on Linux and macOS and Git Bash on Windows, and since installing a plugin means cloning a git repo, anyone who can install this has Git Bash.
 
 If no interpreter is found, the launcher writes one line to the log, drops a marker so it never complains again, and exits 0. Nobody's session breaks — but telemetry is silently inactive on that machine. See Known limitations.
 
@@ -65,8 +65,8 @@ Both are free text, because plugin `userConfig` fields have no enum validation. 
 Anyone can opt out without telling anyone or explaining why.
 
 ```bash
-export QH_TELEMETRY=0          # Linux / macOS, add to ~/.bashrc or ~/.zshrc
-setx QH_TELEMETRY 0            # Windows, then open a new terminal
+export GROWISTO_TELEMETRY=0          # Linux / macOS, add to ~/.bashrc or ~/.zshrc
+setx GROWISTO_TELEMETRY 0            # Windows, then open a new terminal
 ```
 
 Or create an empty `DISABLED` file in the data directory. Or just uninstall the plugin.
@@ -89,9 +89,9 @@ Everything queued is plain text on the employee's own machine, so anyone can rea
 .claude-plugin/plugin.json       manifest, including the install-time prompts
 .claude-plugin/marketplace.json  marketplace definition
 hooks/hooks.json                 the four hook registrations
-hooks/qh_telemetry_hook.py       all the logic; stdlib only
-bin/qh-hook                      cross-platform launcher
-commands/qh-telemetry.md         the /qh-telemetry status and repair command
+hooks/growisto_telemetry_hook.py       all the logic; stdlib only
+bin/growisto-hook                      cross-platform launcher
+commands/growisto-telemetry.md         the /growisto-telemetry status and repair command
 collector/                       optional service, see below
 selftest.py                      the test suite
 ```

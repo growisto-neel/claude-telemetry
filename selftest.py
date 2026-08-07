@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Self-test for the QH Claude Code telemetry hook. Linux, macOS, and Windows.
+Self-test for the Growisto Claude Code telemetry hook. Linux, macOS, and Windows.
 
 Runs entirely in a temp directory, sends no network traffic, and touches
-nothing in your real ~/.qh-claude-telemetry. Run this before rolling out to
+nothing in your real ~/.growisto-claude-telemetry. Run this before rolling out to
 anyone.
 
     python3 selftest.py          (macOS / Linux)
     py -3 selftest.py            (Windows)
 
 Hook registration now belongs to the plugin (hooks/hooks.json plus the
-bin/qh-hook launcher), so nothing here installs, merges, or removes anything
+bin/growisto-hook launcher), so nothing here installs, merges, or removes anything
 from settings.json. What is left is the behaviour of the hook itself.
 
 Everything here is stdlib and platform-neutral; checks that only make sense on
@@ -41,12 +41,12 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable
 
 SELFTEST_SRC = os.path.abspath(__file__)
-HOOK_SRC = os.path.join(REPO, "hooks", "qh_telemetry_hook.py")
+HOOK_SRC = os.path.join(REPO, "hooks", "growisto_telemetry_hook.py")
 COLLECTOR_SRC = os.path.join(REPO, "collector", "main.py")
-LAUNCHER_SRC = os.path.join(REPO, "bin", "qh-hook")
+LAUNCHER_SRC = os.path.join(REPO, "bin", "growisto-hook")
 
-# bin/qh-hook adopts several of these bare names as fallbacks for its
-# QH_TELEMETRY_* equivalents. Stripped from every child environment so a
+# bin/growisto-hook adopts several of these bare names as fallbacks for its
+# GROWISTO_TELEMETRY_* equivalents. Stripped from every child environment so a
 # developer who happens to have GA4_API_SECRET exported does not accidentally
 # point the self-test at real analytics.
 CONFIG_ENV_NAMES = (
@@ -132,7 +132,7 @@ class Report:
             for failure in self.failures:
                 print("  - %s" % failure)
             return 1
-        print("All good. Nothing in your real ~/.qh-claude-telemetry was "
+        print("All good. Nothing in your real ~/.growisto-claude-telemetry was "
               "touched.")
         return 0
 
@@ -144,25 +144,25 @@ R = Report()
 # scaffolding
 # ---------------------------------------------------------------------------
 
-TMP = tempfile.mkdtemp(prefix="qh-selftest-")
+TMP = tempfile.mkdtemp(prefix="growisto-selftest-")
 TEL_DIR = os.path.join(TMP, "telemetry")
-HOOK = os.path.join(TEL_DIR, "qh_telemetry_hook.py")
+HOOK = os.path.join(TEL_DIR, "growisto_telemetry_hook.py")
 SPOOL = os.path.join(TEL_DIR, "spool.ndjson")
 
 # The hook resolves its paths from the environment at import time, so this must
 # be set before the module is loaded further down.
-os.environ["QH_TELEMETRY_DIR"] = TEL_DIR
+os.environ["GROWISTO_TELEMETRY_DIR"] = TEL_DIR
 for _name in list(os.environ):
-    if _name.startswith("QH_TELEMETRY_") and _name != "QH_TELEMETRY_DIR":
+    if _name.startswith("GROWISTO_TELEMETRY_") and _name != "GROWISTO_TELEMETRY_DIR":
         del os.environ[_name]
-os.environ.pop("QH_TELEMETRY", None)
+os.environ.pop("GROWISTO_TELEMETRY", None)
 
 
 def child_env(**extra):
     """A clean environment for a child process, pointed at the temp install."""
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith("QH_TELEMETRY") and k not in CONFIG_ENV_NAMES}
-    env["QH_TELEMETRY_DIR"] = TEL_DIR
+           if not k.startswith("GROWISTO_TELEMETRY") and k not in CONFIG_ENV_NAMES}
+    env["GROWISTO_TELEMETRY_DIR"] = TEL_DIR
     for key, value in extra.items():
         if value is None:
             env.pop(key, None)
@@ -244,7 +244,7 @@ def do_install(email="tester@growisto.com", team="selftest",
     left is making sure the hook reads its configuration and behaves.
     """
     os.makedirs(base, exist_ok=True)
-    shutil.copy2(HOOK_SRC, os.path.join(base, "qh_telemetry_hook.py"))
+    shutil.copy2(HOOK_SRC, os.path.join(base, "growisto_telemetry_hook.py"))
 
     config = {
         "user_email": email,
@@ -299,12 +299,12 @@ def section_syntax():
     # actually runs on all three platforms.
     bash = shutil.which("bash")
     if not os.path.exists(LAUNCHER_SRC):
-        R.bad("bin/qh-hook is missing")
+        R.bad("bin/growisto-hook is missing")
     elif not bash:
-        R.skip("bin/qh-hook syntax", "no bash on this machine")
+        R.skip("bin/growisto-hook syntax", "no bash on this machine")
     else:
         proc = run([bash, "-n", LAUNCHER_SRC])
-        R.truth("bin/qh-hook syntax", proc.returncode == 0)
+        R.truth("bin/growisto-hook syntax", proc.returncode == 0)
         if proc.returncode != 0:
             print("      %s" % proc.stderr.decode("utf-8", "replace").strip()[:300])
 
@@ -323,7 +323,7 @@ def section_capture():
           "source": "startup", "model": "claude-opus-5"})
     emit({"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": TMP,
           "tool_name": "Skill",
-          "tool_input": {"skill": "qh-prototypes:create-backend"}})
+          "tool_input": {"skill": "growisto-prototypes:create-backend"}})
     emit({"hook_event_name": "SessionEnd", "session_id": "s1", "cwd": TMP,
           "reason": "exit"})
 
@@ -342,7 +342,7 @@ def section_capture():
             sum(1 for e in events if "prompt" in e), 0)
     R.check("skill name extracted",
             by_name.get("cc_skill", {}).get("skill"),
-            "qh-prototypes:create-backend")
+            "growisto-prototypes:create-backend")
     R.check("email from config", events[0].get("user_email"),
             "tester@growisto.com")
     R.check("team recorded", events[0].get("team"), "selftest")
@@ -392,7 +392,7 @@ def section_redaction_and_modes():
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s3", "cwd": TMP,
           "prompt": "sensitive patient record 12345"},
-         QH_TELEMETRY_PROMPT_CAPTURE="hash")
+         GROWISTO_TELEMETRY_PROMPT_CAPTURE="hash")
     wait_for(lambda: spool_count() >= 1)
     event = (spool_events() or [{}])[0]
     R.truth("hash mode stores no prompt text at all",
@@ -402,31 +402,31 @@ def section_redaction_and_modes():
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4",
-          "cwd": "/Users/x/src/qh-platform", "prompt": "hi"},
-         QH_TELEMETRY_PATH_CAPTURE="basename")
+          "cwd": "/Users/x/src/growisto-platform", "prompt": "hi"},
+         GROWISTO_TELEMETRY_PATH_CAPTURE="basename")
     wait_for(lambda: spool_count() >= 1)
     R.check("basename path mode drops full path (posix input)",
-            (spool_events() or [{}])[0].get("folder_path"), "qh-platform")
+            (spool_events() or [{}])[0].get("folder_path"), "growisto-platform")
 
     # A Windows agent reports a backslash cwd. basename must still reduce it,
     # which os.path.basename only does on Windows -- so on POSIX this asserts
     # the honest outcome rather than pretending the path was understood.
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4b",
-          "cwd": r"C:\Users\x\src\qh-platform", "prompt": "hi"},
-         QH_TELEMETRY_PATH_CAPTURE="basename")
+          "cwd": r"C:\Users\x\src\growisto-platform", "prompt": "hi"},
+         GROWISTO_TELEMETRY_PATH_CAPTURE="basename")
     wait_for(lambda: spool_count() >= 1)
     folder = (spool_events() or [{}])[0].get("folder_path")
     if IS_WINDOWS:
         R.check("basename path mode drops full path (windows input)",
-                folder, "qh-platform")
+                folder, "growisto-platform")
     else:
         R.skip("basename path mode on a windows path", "only meaningful on Windows")
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4c",
           "cwd": TMP, "prompt": "hi"},
-         QH_TELEMETRY_PATH_CAPTURE="none")
+         GROWISTO_TELEMETRY_PATH_CAPTURE="none")
     wait_for(lambda: spool_count() >= 1)
     event = (spool_events() or [{}])[0]
     R.truth("none path mode records no path at all",
@@ -439,7 +439,7 @@ def section_redaction_and_modes():
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4d",
           "cwd": TMP, "prompt": "casing should still be understood"},
-         QH_TELEMETRY_PROMPT_CAPTURE=" Hash ")
+         GROWISTO_TELEMETRY_PROMPT_CAPTURE=" Hash ")
     wait_for(lambda: spool_count() >= 1)
     event = (spool_events() or [{}])[0]
     R.truth("' Hash ' normalises to hash mode",
@@ -448,7 +448,7 @@ def section_redaction_and_modes():
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4e",
           "cwd": TMP, "prompt": "a typo must not widen capture"},
-         QH_TELEMETRY_PROMPT_CAPTURE="preveiw")
+         GROWISTO_TELEMETRY_PROMPT_CAPTURE="preveiw")
     wait_for(lambda: spool_count() >= 1)
     event = (spool_events() or [{}])[0]
     R.truth("unrecognised prompt mode falls back to hash, not preview",
@@ -456,8 +456,8 @@ def section_redaction_and_modes():
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4f",
-          "cwd": "/Users/x/src/qh-platform", "prompt": "hi"},
-         QH_TELEMETRY_PATH_CAPTURE="basenmae")
+          "cwd": "/Users/x/src/growisto-platform", "prompt": "hi"},
+         GROWISTO_TELEMETRY_PATH_CAPTURE="basenmae")
     wait_for(lambda: spool_count() >= 1)
     event = (spool_events() or [{}])[0]
     R.truth("unrecognised path mode falls back to none, not full",
@@ -473,9 +473,9 @@ def section_optout_and_robustness():
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s5", "cwd": TMP,
-          "prompt": "should not be recorded"}, QH_TELEMETRY="0")
+          "prompt": "should not be recorded"}, GROWISTO_TELEMETRY="0")
     time.sleep(0.5)
-    R.check("QH_TELEMETRY=0 records nothing", spool_count(), 0)
+    R.check("GROWISTO_TELEMETRY=0 records nothing", spool_count(), 0)
 
     disabled = os.path.join(TEL_DIR, "DISABLED")
     with open(disabled, "w", encoding="utf-8") as fh:
@@ -501,7 +501,7 @@ def section_optout_and_robustness():
 
     clear_spool()
     proc = emit({"hook_event_name": "UserPromptSubmit", "prompt": "x"},
-                QH_TELEMETRY_COLLECTOR_URL="http://127.0.0.1:9/dead")
+                GROWISTO_TELEMETRY_COLLECTOR_URL="http://127.0.0.1:9/dead")
     R.check("unreachable collector exits 0", proc.returncode, 0)
     R.check("unreachable collector prints nothing to the session", proc.stdout, b"")
     R.truth("events survive a failed send",
@@ -575,7 +575,7 @@ def section_recovery(hook):
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "dup",
           "cwd": TMP, "prompt": "once only"},
-         QH_TELEMETRY_COLLECTOR_URL="http://127.0.0.1:9/dead")
+         GROWISTO_TELEMETRY_COLLECTOR_URL="http://127.0.0.1:9/dead")
     wait_for(lambda: spool_count() >= 1, seconds=20)
     time.sleep(2)  # give the flusher time to finish and requeue
     R.check("failed event requeued exactly once", spool_count(), 1)
@@ -771,7 +771,7 @@ def section_spaces():
     # space in the base directory is what breaks naive quoting: the hook keeps
     # running, writes its spool somewhere else or nowhere, and everything still
     # looks installed. Worth its own check even without an installer.
-    base = os.path.join(TMP, "Telemetry Dir", ".qh-claude-telemetry")
+    base = os.path.join(TMP, "Telemetry Dir", ".growisto-claude-telemetry")
     do_install(email="spaces@growisto.com", team="spaces", base=base)
     spaced_spool = os.path.join(base, "spool.ndjson")
 
@@ -779,10 +779,10 @@ def section_spaces():
                           "session_id": "spaced", "cwd": base,
                           "prompt": "running under a path with spaces"})
     proc = subprocess.run(
-        [PY, os.path.join(base, "qh_telemetry_hook.py")],
+        [PY, os.path.join(base, "growisto_telemetry_hook.py")],
         input=payload.encode("utf-8"),
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        env=child_env(QH_TELEMETRY_DIR=base), timeout=60,
+        env=child_env(GROWISTO_TELEMETRY_DIR=base), timeout=60,
     )
     R.check("the hook runs from a spaced directory", proc.returncode, 0)
     R.check("it prints nothing into the session", proc.stdout, b"")
@@ -798,14 +798,14 @@ def section_spaces():
     # a discoverable interpreter cannot be guaranteed.
     bash = shutil.which("bash")
     if IS_WINDOWS:
-        R.skip("bin/qh-hook under a spaced base directory",
+        R.skip("bin/growisto-hook under a spaced base directory",
                "needs Git Bash with a discoverable Python")
     elif not bash:
-        R.skip("bin/qh-hook under a spaced base directory", "no bash on this machine")
+        R.skip("bin/growisto-hook under a spaced base directory", "no bash on this machine")
     else:
-        launcher_base = os.path.join(TMP, "Launcher Dir", ".qh-claude-telemetry")
+        launcher_base = os.path.join(TMP, "Launcher Dir", ".growisto-claude-telemetry")
         do_install(email="launcher@growisto.com", team="spaces", base=launcher_base)
-        env = child_env(QH_TELEMETRY_DIR=launcher_base, QH_TELEMETRY_PYTHON=PY)
+        env = child_env(GROWISTO_TELEMETRY_DIR=launcher_base, GROWISTO_TELEMETRY_PYTHON=PY)
         body = json.dumps({"hook_event_name": "UserPromptSubmit",
                            "session_id": "launched", "cwd": launcher_base,
                            "prompt": "launched under a path with spaces"})
@@ -814,17 +814,17 @@ def section_spaces():
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=env, timeout=60,
         )
-        R.check("bin/qh-hook exits 0", proc.returncode, 0)
-        R.check("bin/qh-hook prints nothing into the session", proc.stdout, b"")
+        R.check("bin/growisto-hook exits 0", proc.returncode, 0)
+        R.check("bin/growisto-hook prints nothing into the session", proc.stdout, b"")
         launched_spool = os.path.join(launcher_base, "spool.ndjson")
-        R.truth("bin/qh-hook recorded the event",
+        R.truth("bin/growisto-hook recorded the event",
                 wait_for(lambda: spool_count(launched_spool) >= 1, seconds=20))
 
 
 # ===========================================================================
 
 def main():
-    print(_paint("1", "QH Claude Code telemetry self-test"))
+    print(_paint("1", "Growisto Claude Code telemetry self-test"))
     print("  platform:  %s (%s)" % (sys.platform, "windows" if IS_WINDOWS else "posix"))
     print("  python:    %s" % sys.version.split()[0])
     print("  temp dir:  %s" % TMP)
@@ -836,7 +836,7 @@ def main():
         # plugin lays one out at runtime.
         do_install()
 
-        hook = load_module("qh_hook_under_test", HOOK_SRC)
+        hook = load_module("growisto_hook_under_test", HOOK_SRC)
 
         section_capture()
         section_redaction_and_modes()

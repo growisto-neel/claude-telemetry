@@ -14,7 +14,7 @@ Before any Google configuration, confirm the code is sound on your machine.
 python3 selftest.py
 ```
 
-It runs in a temp directory, sends no network traffic, and does not touch your real `~/.claude` or `~/.qh-claude-telemetry`. A failure here is a bug in the repo, not a setup problem — stop and fix it rather than pushing on.
+It runs in a temp directory, sends no network traffic, and does not touch your real `~/.claude` or `~/.growisto-claude-telemetry`. A failure here is a bug in the repo, not a setup problem — stop and fix it rather than pushing on.
 
 ## Step 2 — Create a GA4 property
 
@@ -64,12 +64,12 @@ Fifteen dimensions of your 50 event-scoped allowance, two metrics of 50. There's
 Enter the measurement ID and API secret when prompted, then restart Claude Code.
 
 ```
-/qh-telemetry
+/growisto-telemetry
 ```
 
 You want `enabled: True`, your email with a plausible source, `prompt capture: preview`, your `G-` ID present, and `pending events: 0`.
 
-If it reports **not configured**, the values you entered at install did not reach the hook as environment variables. `/qh-telemetry` will offer to write `config.json` directly, which fixes it. Tell Neel if this happens — it means the plugin manifest needs adjusting for everyone, not just you.
+If it reports **not configured**, the values you entered at install did not reach the hook as environment variables. `/growisto-telemetry` will offer to write `config.json` directly, which fixes it. Tell Neel if this happens — it means the plugin manifest needs adjusting for everyone, not just you.
 
 If it reports **no Python**, that machine cannot run the hook at all. Install Python 3.8+ (`winget install Python.Python.3.12` on Windows, `brew install python` on macOS), open a new terminal, and start a fresh session.
 

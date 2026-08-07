@@ -11,12 +11,12 @@ or block an employee's Claude Code session:
   - network I/O happens in a detached background process
   - if the network is down, events stay spooled and are sent next time
 
-Usage (wired up by the plugin's hooks/hooks.json, via bin/qh-hook):
-    qh_telemetry_hook.py            # hook mode, event JSON on stdin
-    qh_telemetry_hook.py --flush    # background sender
-    qh_telemetry_hook.py --status   # human-readable diagnostics
-    qh_telemetry_hook.py --test     # send a synthetic event, print result
-    qh_telemetry_hook.py --secure P # lock file P down to the current user
+Usage (wired up by the plugin's hooks/hooks.json, via bin/growisto-hook):
+    growisto_telemetry_hook.py            # hook mode, event JSON on stdin
+    growisto_telemetry_hook.py --flush    # background sender
+    growisto_telemetry_hook.py --status   # human-readable diagnostics
+    growisto_telemetry_hook.py --test     # send a synthetic event, print result
+    growisto_telemetry_hook.py --secure P # lock file P down to the current user
 
 Runs on Linux, macOS, and Windows against Python 3.8+ with no third-party
 dependencies. The platform section below covers the three places where Windows
@@ -33,7 +33,7 @@ import time
 import uuid
 
 HOME = os.path.expanduser("~")
-BASE_DIR = os.environ.get("QH_TELEMETRY_DIR", os.path.join(HOME, ".qh-claude-telemetry"))
+BASE_DIR = os.environ.get("GROWISTO_TELEMETRY_DIR", os.path.join(HOME, ".growisto-claude-telemetry"))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 SPOOL_PATH = os.path.join(BASE_DIR, "spool.ndjson")
 LOCK_PATH = os.path.join(BASE_DIR, "flush.lock")
@@ -241,15 +241,15 @@ def load_config():
 
     # Environment always wins, so ops can override without touching files.
     env_map = {
-        "collector_url": "QH_TELEMETRY_COLLECTOR_URL",
-        "collector_token": "QH_TELEMETRY_COLLECTOR_TOKEN",
-        "ga4_measurement_id": "QH_TELEMETRY_GA4_MEASUREMENT_ID",
-        "ga4_api_secret": "QH_TELEMETRY_GA4_API_SECRET",
-        "user_email": "QH_TELEMETRY_USER_EMAIL",
-        "team": "QH_TELEMETRY_TEAM",
-        "prompt_capture": "QH_TELEMETRY_PROMPT_CAPTURE",
-        "path_capture": "QH_TELEMETRY_PATH_CAPTURE",
-        "debug": "QH_TELEMETRY_DEBUG",
+        "collector_url": "GROWISTO_TELEMETRY_COLLECTOR_URL",
+        "collector_token": "GROWISTO_TELEMETRY_COLLECTOR_TOKEN",
+        "ga4_measurement_id": "GROWISTO_TELEMETRY_GA4_MEASUREMENT_ID",
+        "ga4_api_secret": "GROWISTO_TELEMETRY_GA4_API_SECRET",
+        "user_email": "GROWISTO_TELEMETRY_USER_EMAIL",
+        "team": "GROWISTO_TELEMETRY_TEAM",
+        "prompt_capture": "GROWISTO_TELEMETRY_PROMPT_CAPTURE",
+        "path_capture": "GROWISTO_TELEMETRY_PATH_CAPTURE",
+        "debug": "GROWISTO_TELEMETRY_DEBUG",
     }
     for key, env in env_map.items():
         val = os.environ.get(env)
@@ -286,10 +286,10 @@ def _pick(value, allowed, absent, invalid):
 
 def telemetry_disabled():
     """Employee opt-out. Any of these switches turns the hook into a no-op."""
-    for var in ("QH_TELEMETRY", "QH_TELEMETRY_ENABLED"):
+    for var in ("GROWISTO_TELEMETRY", "GROWISTO_TELEMETRY_ENABLED"):
         if os.environ.get(var, "").strip().lower() in ("0", "false", "off", "no"):
             return True
-    if os.environ.get("QH_TELEMETRY_DISABLE", "").strip().lower() in ("1", "true", "yes", "on"):
+    if os.environ.get("GROWISTO_TELEMETRY_DISABLE", "").strip().lower() in ("1", "true", "yes", "on"):
         return True
     if os.path.exists(os.path.join(BASE_DIR, "DISABLED")):
         return True
@@ -1101,7 +1101,7 @@ def status_mode():
             spool_lines = sum(1 for _ in fh)
     except Exception:
         pass
-    print("QH Claude telemetry status")
+    print("Growisto Claude telemetry status")
     print("  platform:        %s (%s)" % (sys.platform, "windows" if IS_WINDOWS else "posix"))
     print("  python:          %s" % sys.executable)
     print("  enabled:         %s" % (not telemetry_disabled()))
@@ -1113,7 +1113,7 @@ def status_mode():
     print("  ga4 direct:      %s" % (cfg.get("ga4_measurement_id") or "(not configured)"))
     print("  pending events:  %d" % spool_lines)
     print("  log:             %s" % LOG_PATH)
-    print("\nTo opt out at any time:  export QH_TELEMETRY=0")
+    print("\nTo opt out at any time:  export GROWISTO_TELEMETRY=0")
 
 
 def test_mode():
@@ -1144,7 +1144,7 @@ def main():
         # Used by the installers so the ACL/chmod logic lives in one place
         # rather than being reimplemented in bash and in PowerShell.
         if len(sys.argv) < 3:
-            print("usage: qh_telemetry_hook.py --secure <path>")
+            print("usage: growisto_telemetry_hook.py --secure <path>")
             raise SystemExit(2)
         print(secure_file(sys.argv[2]))
         return

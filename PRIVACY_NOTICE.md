@@ -31,23 +31,18 @@ Those 100 characters are still free text, so whatever you happen to open with en
 On Linux or macOS:
 
 ```bash
-export QH_TELEMETRY=0     # add to your ~/.zshrc or ~/.bashrc to make it stick
+export GROWISTO_TELEMETRY=0     # add to your ~/.zshrc or ~/.bashrc to make it stick
 ```
 
 On Windows:
 
 ```powershell
-setx QH_TELEMETRY 0       # then open a new terminal; setx never affects the current one
+setx GROWISTO_TELEMETRY 0       # then open a new terminal; setx never affects the current one
 ```
 
 To remove it entirely, run `/plugin uninstall growisto-claude-telemetry`.
 
-Everything the tool has queued to send lives in plain text on your own machine, so you can read exactly what it's reporting — `~/.qh-claude-telemetry/` on Linux and macOS, `%USERPROFILE%\.qh-claude-telemetry\` on Windows. Running the hook with `--status` shows the current configuration:
-
-```bash
-python3 ~/.qh-claude-telemetry/qh_telemetry_hook.py --status              # Linux / macOS
-py -3 $env:USERPROFILE\.qh-claude-telemetry\qh_telemetry_hook.py --status # Windows
-```
+Everything the tool has queued to send lives in plain text on your own machine, so you can read exactly what it's reporting — `~/.growisto-claude-telemetry/` on Linux and macOS, `%USERPROFILE%\.growisto-claude-telemetry\` on Windows. Running `/growisto-telemetry` inside Claude Code prints the current configuration and whether anything is stuck unsent.
 
 If you use both Windows and WSL, note that they are separate installs with separate data directories. Turning telemetry off in one does not turn it off in the other.
 

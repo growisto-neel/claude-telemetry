@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Self-test for the QH Claude Code telemetry hook.
+# Self-test for the Growisto Claude Code telemetry hook.
 #
 # The suite itself lives in selftest.py so that Windows, macOS, and Linux all
 # run exactly the same checks. This wrapper exists so the shell command people

@@ -1,5 +1,5 @@
 ---
-description: Check QH telemetry status, or finish configuring it if credentials did not carry over from install
+description: Check Growisto telemetry status, or finish configuring it if credentials did not carry over from install
 ---
 
 Report the state of the Growisto Claude Code telemetry plugin for this user, and repair its configuration if it is incomplete.
@@ -9,13 +9,13 @@ Report the state of the Growisto Claude Code telemetry plugin for this user, and
 Run the hook's own status command and show the user the output verbatim:
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}"/bin/qh-hook --status
+bash "${CLAUDE_PLUGIN_ROOT}"/bin/growisto-hook --status
 ```
 
 If that produces nothing useful, fall back to invoking the Python directly, trying `python3`, then `python`, then `py -3`:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/qh_telemetry_hook.py --status
+python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/growisto_telemetry_hook.py --status
 ```
 
 The lines that matter are `enabled`, the resolved email and where it came from, `prompt capture`, whether a GA4 destination is configured, and `pending events`.
@@ -30,7 +30,7 @@ Read the status output and tell the user plainly which of these they are in:
 
 **Configured but not sending.** A `G-` ID is present and `pending events` is above zero. Read the last few lines of `telemetry.log` in the data directory and report what the send actually failed with — a 403 is a wrong API secret, a connection error is a proxy or firewall.
 
-**Not configured.** No GA4 destination. This is the case step 3 handles: it means the values collected at install time did not reach the hook.
+**Not configured.** No GA4 destination. A `NO_DEST` marker in the data directory and a `no GA4 destination` line in `telemetry.log` confirm it; that log line also names the `CLAUDE_PLUGIN_OPTION_*` variables the hook could see, which is what tells you whether the install-time values reached it at all. This is the case step 3 handles.
 
 **Opted out.** `enabled: False`. Say so and leave it alone. Do not re-enable telemetry for someone who turned it off, and do not ask them why.
 
@@ -38,7 +38,7 @@ Read the status output and tell the user plainly which of these they are in:
 
 Ask the user for the GA4 measurement ID and API secret, telling them to get both from Neel if they do not have them. Ask for their work email and team, offering their `git config user.email` as the default.
 
-Then write `config.json` into the telemetry data directory — `$QH_TELEMETRY_DIR` if set, otherwise `~/.qh-claude-telemetry/` on Linux and macOS or `%USERPROFILE%\.qh-claude-telemetry\` on Windows — with exactly these keys:
+Then write `config.json` into the telemetry data directory — `$GROWISTO_TELEMETRY_DIR` if set, otherwise `~/.growisto-claude-telemetry/` on Linux and macOS or `%USERPROFILE%\.growisto-claude-telemetry\` on Windows — with exactly these keys:
 
 ```json
 {
