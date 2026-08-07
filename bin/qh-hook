@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# Single entry point for every QH telemetry hook, on every platform.
+#
+# Claude Code runs hook commands through a shell: bash on Linux and macOS, Git
+# Bash on Windows, falling back to PowerShell only when Git for Windows is not
+# installed. Installing this plugin means cloning a git repo, so anyone who can
+# install it has git, and on Windows that means Git Bash. One bash script is
+# therefore enough for all three platforms, and there is no PowerShell launcher
+# to keep in step with this one.
+#
+# Two rules govern everything below:
+#
+#   1. Exit 0, always. A non-zero exit from a UserPromptSubmit hook can block
+#      the prompt. Telemetry must never stand between someone and their work.
+#   2. Print nothing on stdout, ever. Whatever a UserPromptSubmit hook prints
+#      on stdout is injected into Claude's context, where it would silently
+#      corrupt the conversation.
+#
+# Both rules are enforced at the bottom rather than trusted to every path
+# through the script.
+
+set -u
+
+PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOOK_PY="$PLUGIN_ROOT/hooks/qh_telemetry_hook.py"
+
+BASE_DIR="${QH_TELEMETRY_DIR:-$HOME/.qh-claude-telemetry}"
+LOG="$BASE_DIR/telemetry.log"
+
+# ---------------------------------------------------------------------------
+# userConfig plumbing
+# ---------------------------------------------------------------------------
+# Claude Code prompts for the values declared in .claude-plugin/plugin.json and
+# is expected to expose them to hooks as environment variables. The exact naming
+# it uses is the one thing in this design not confirmed against a real install,
+# so rather than depend on a single guess, accept the plausible spellings and
+# normalise them onto the QH_TELEMETRY_* names the Python hook already reads.
+#
+# If none of them arrive, nothing here fires and the hook falls back to
+# config.json, which /qh-telemetry writes. That fallback is the reason an
+# unconfirmed guess is safe to ship.
+adopt() {
+    # adopt <target-env-name> <candidate> [candidate...]
+    local target="$1"; shift
+    [ -n "${!target:-}" ] && return 0
+    local candidate
+    for candidate in "$@"; do
+        if [ -n "${!candidate:-}" ]; then
+            export "$target=${!candidate}"
+            return 0
+        fi
+    done
+    return 0
+}
+
+adopt QH_TELEMETRY_GA4_MEASUREMENT_ID \
+      CLAUDE_PLUGIN_CONFIG_ga4MeasurementId ga4MeasurementId GA4_MEASUREMENT_ID
+adopt QH_TELEMETRY_GA4_API_SECRET \
+      CLAUDE_PLUGIN_CONFIG_ga4ApiSecret ga4ApiSecret GA4_API_SECRET
+adopt QH_TELEMETRY_USER_EMAIL \
+      CLAUDE_PLUGIN_CONFIG_userEmail userEmail
+adopt QH_TELEMETRY_TEAM \
+      CLAUDE_PLUGIN_CONFIG_team team
+adopt QH_TELEMETRY_PROMPT_CAPTURE \
+      CLAUDE_PLUGIN_CONFIG_promptCapture promptCapture
+adopt QH_TELEMETRY_PATH_CAPTURE \
+      CLAUDE_PLUGIN_CONFIG_pathCapture pathCapture
+
+# ---------------------------------------------------------------------------
+# find an interpreter
+# ---------------------------------------------------------------------------
+# Ordered by how likely each is to be a real interpreter rather than a stub.
+# On Windows, `python` is frequently the Microsoft Store shim, which prints an
+# advert and exits non-zero; the version probe rejects it without a special
+# case. `py -3` is the launcher Git Bash users usually have.
+find_python() {
+    local candidate
+    for candidate in "${QH_TELEMETRY_PYTHON:-}" python3 python py; do
+        [ -n "$candidate" ] || continue
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        if [ "$candidate" = "py" ]; then
+            if py -3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' \
+                 >/dev/null 2>&1; then
+                PY_CMD=(py -3)
+                return 0
+            fi
+            continue
+        fi
+        if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' \
+             >/dev/null 2>&1; then
+            PY_CMD=("$candidate")
+            return 0
+        fi
+    done
+
+    # Git Bash does not put a Windows Python on PATH unless the installer was
+    # told to. Check where the official installer actually puts it before
+    # concluding the machine has none.
+    local base
+    for base in "$LOCALAPPDATA/Programs/Python" "/c/Python3"* "/c/Program Files/Python3"*; do
+        [ -d "$base" ] || continue
+        for candidate in "$base"/*/python.exe "$base/python.exe"; do
+            [ -x "$candidate" ] || continue
+            if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' \
+                 >/dev/null 2>&1; then
+                PY_CMD=("$candidate")
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+PY_CMD=()
+if ! find_python; then
+    # No interpreter. Say so once, in a place someone will find, and then stop
+    # complaining -- a warning on every prompt would be worse than the missing
+    # telemetry. The marker is what makes it once rather than forever.
+    marker="$BASE_DIR/NO_PYTHON"
+    if [ ! -f "$marker" ]; then
+        mkdir -p "$BASE_DIR" 2>/dev/null || exit 0
+        printf '%s qh-telemetry: no Python 3.8+ found; telemetry is inactive on this machine.\n' \
+            "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >>"$LOG" 2>/dev/null
+        : >"$marker" 2>/dev/null
+    fi
+    exit 0
+fi
+
+# A previous run may have left the marker behind. Python arriving later should
+# clear it, otherwise the log keeps claiming a problem that has been fixed.
+rm -f "$BASE_DIR/NO_PYTHON" 2>/dev/null
+
+# ---------------------------------------------------------------------------
+# run it
+# ---------------------------------------------------------------------------
+mkdir -p "$BASE_DIR" 2>/dev/null
+
+if [ "$#" -gt 0 ]; then
+    # Invoked by a human -- `qh-hook --status`, `--test`, `--flush`. Let the
+    # output reach the terminal and let the real exit code through, because
+    # here the exit code is the answer rather than something that could block
+    # somebody's prompt.
+    "${PY_CMD[@]}" "$HOOK_PY" "$@"
+    exit $?
+fi
+
+# Invoked by Claude Code. stdin is the hook payload and passes straight through.
+# Both output streams go to the log rather than the terminal: the hook is not
+# supposed to print anything at all, but if it ever does, discarding the text
+# would make that bug invisible, while letting it reach stdout would feed it
+# into Claude's context.
+"${PY_CMD[@]}" "$HOOK_PY" >>"$LOG" 2>&1
+
+exit 0

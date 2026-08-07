@@ -1,0 +1,20 @@
+{
+  "name": "qualified-health",
+  "owner": {
+    "name": "Qualified Health Platform",
+    "email": "platform@qualifiedhealthai.com"
+  },
+  "metadata": {
+    "description": "Internal Claude Code plugins for Qualified Health.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "qh-claude-telemetry",
+      "source": "./",
+      "description": "Records Claude Code usage (prompt preview, skill, folder, session) to QH analytics. Never records full prompts, responses, or file contents.",
+      "version": "0.2.0",
+      "category": "internal"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Never commit a real config: it holds the GA4 api_secret.
+config.json
+*.bak.*
+spool.ndjson*
+telemetry.log

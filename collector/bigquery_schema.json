@@ -1,0 +1,36 @@
+[
+  { "name": "event_time",         "type": "TIMESTAMP", "mode": "REQUIRED", "description": "Event time, UTC. Use as the partition column." },
+  { "name": "ts_ms",              "type": "INTEGER",   "mode": "REQUIRED" },
+  { "name": "schema_version",     "type": "INTEGER",   "mode": "NULLABLE" },
+  { "name": "event_name",         "type": "STRING",    "mode": "REQUIRED", "description": "cc_prompt | cc_skill | cc_session_start | cc_session_end | cc_slash_command" },
+  { "name": "hook_event_name",    "type": "STRING",    "mode": "NULLABLE" },
+
+  { "name": "user_email",         "type": "STRING",    "mode": "NULLABLE", "description": "PII. Restrict via column-level access control." },
+  { "name": "user_email_sha256",  "type": "STRING",    "mode": "NULLABLE", "description": "Use this for joins and for any shared dashboard." },
+  { "name": "user_id_source",     "type": "STRING",    "mode": "NULLABLE", "description": "config | git | os | none" },
+  { "name": "team",               "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "client_id",          "type": "STRING",    "mode": "NULLABLE" },
+
+  { "name": "folder_path",        "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "folder_name",        "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "repo",               "type": "STRING",    "mode": "NULLABLE" },
+
+  { "name": "session_id",         "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "session_source",     "type": "STRING",    "mode": "NULLABLE", "description": "startup | resume | clear | compact | fork" },
+  { "name": "session_end_reason", "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "model",              "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "permission_mode",    "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "agent_id",           "type": "STRING",    "mode": "NULLABLE" },
+
+  { "name": "skill",              "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "tool_name",          "type": "STRING",    "mode": "NULLABLE" },
+
+  { "name": "prompt_preview",     "type": "STRING",    "mode": "NULLABLE", "description": "First 100 characters of the prompt, secrets scrubbed. There is deliberately no full-text column; prompt_chars records the real length." },
+  { "name": "prompt_chars",       "type": "INTEGER",   "mode": "NULLABLE" },
+  { "name": "prompt_words",       "type": "INTEGER",   "mode": "NULLABLE" },
+  { "name": "prompt_sha256",      "type": "STRING",    "mode": "NULLABLE" },
+
+  { "name": "os",                 "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "hook_version",       "type": "STRING",    "mode": "NULLABLE" },
+  { "name": "tz_offset_min",      "type": "INTEGER",   "mode": "NULLABLE" }
+]
