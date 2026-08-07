@@ -58,7 +58,7 @@ Fifteen dimensions of your 50 event-scoped allowance, two metrics of 50. There's
 
 ```
 /plugin marketplace add growisto-neel/claude-telemetry
-/plugin install qh-claude-telemetry@growisto
+/plugin install growisto-claude-telemetry@growisto
 ```
 
 Enter the measurement ID and API secret when prompted, then restart Claude Code.

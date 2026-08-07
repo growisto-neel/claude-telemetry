@@ -10,14 +10,14 @@ Two commands to install, nothing to download, no admin rights. Works on Linux, m
 
 ```
 /plugin marketplace add growisto-neel/claude-telemetry
-/plugin install qh-claude-telemetry@growisto
+/plugin install growisto-claude-telemetry@growisto
 ```
 
 Claude Code prompts for the GA4 measurement ID and API secret during install. Get both from Neel. Restart Claude Code afterwards — hooks only load when a session starts.
 
 To check it worked, run `/qh-telemetry`. That reports whether telemetry is enabled, which email it resolved, and whether anything is stuck unsent. It also repairs the configuration if the values you entered at install did not reach the hook.
 
-To remove it: `/plugin uninstall qh-claude-telemetry`.
+To remove it: `/plugin uninstall growisto-claude-telemetry`.
 
 ## What it records
 
@@ -72,7 +72,7 @@ Or create an empty `DISABLED` file in the data directory. Or just uninstall the 
 ## Where things live
 
 ```
-~/.qh-claude-telemetry/          %USERPROFILE%\.qh-claude-telemetry\ on Windows
+~/.growisto-claude-telemetry/          %USERPROFILE%\.growisto-claude-telemetry\ on Windows
 ├── config.json                  credentials and settings; owner-readable only
 ├── spool.ndjson                 events waiting to be sent
 ├── telemetry.log                errors only; empty is good
@@ -110,7 +110,7 @@ The one reason to run it: the GA4 API secret is a write credential, and in direc
 python3 selftest.py        # or ./selftest.sh
 ```
 
-Runs in a temp directory, sends no network traffic, and does not touch your real `~/.claude` or `~/.qh-claude-telemetry`. Twelve areas: syntax, event capture, noise filtering, secret redaction, capture modes, opt-out, resilience and latency, GA4 payload shape, crash recovery, duplicate suppression, platform behaviour, and paths containing spaces.
+Runs in a temp directory, sends no network traffic, and does not touch your real `~/.claude` or `~/.growisto-claude-telemetry`. Twelve areas: syntax, event capture, noise filtering, secret redaction, capture modes, opt-out, resilience and latency, GA4 payload shape, crash recovery, duplicate suppression, platform behaviour, and paths containing spaces.
 
 The platform section is the one worth knowing about. On POSIX the standard way to ask "is process N alive?" is `os.kill(pid, 0)`; on Windows that same call *terminates* the process, and Windows recycles PIDs. A naive port would have had telemetry killing unrelated programs. The suite starts a real child, probes it, and asserts it survived.
 

@@ -40,7 +40,7 @@ On Windows:
 setx QH_TELEMETRY 0       # then open a new terminal; setx never affects the current one
 ```
 
-To remove it entirely, run `/plugin uninstall qh-claude-telemetry`.
+To remove it entirely, run `/plugin uninstall growisto-claude-telemetry`.
 
 Everything the tool has queued to send lives in plain text on your own machine, so you can read exactly what it's reporting — `~/.qh-claude-telemetry/` on Linux and macOS, `%USERPROFILE%\.qh-claude-telemetry\` on Windows. Running the hook with `--status` shows the current configuration:
 
