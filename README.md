@@ -58,6 +58,8 @@ Set at install time, changeable by reinstalling or by editing `config.json`.
 
 `pathCapture` is `full` (the working directory path), `basename` (just the folder name), or `none` (no location at all — this suppresses `folder_name` as well as `folder_path`).
 
+Both are free text, because plugin `userConfig` fields have no enum validation. Case and surrounding whitespace don't matter, but anything else unrecognised fails closed — an unreadable `promptCapture` becomes `hash` and an unreadable `pathCapture` becomes `none`, so a typo can only ever narrow what's collected. Leaving a field blank keeps the defaults above.
+
 ## Opting out
 
 Anyone can opt out without telling anyone or explaining why.

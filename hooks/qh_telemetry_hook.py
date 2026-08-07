@@ -256,9 +256,32 @@ def load_config():
         if val:
             cfg[key] = val
 
-    cfg.setdefault("prompt_capture", "preview")  # preview | hash
-    cfg.setdefault("path_capture", "full")       # full | basename | none
+    # Both of these are privacy dials, and neither source that sets them can
+    # validate them: plugin.json's userConfig has no enum support, and an
+    # environment variable is free text by definition. So normalise here, and
+    # fail *closed* -- an absent value keeps the documented default, but a value
+    # that was clearly meant to be something and came out wrong ("Hash",
+    # "basename ", "nonw") resolves to the most private option rather than
+    # quietly widening capture beyond what the person asked for.
+    cfg["prompt_capture"] = _pick(cfg.get("prompt_capture"),
+                                  allowed=("preview", "hash"),
+                                  absent="preview", invalid="hash")
+    cfg["path_capture"] = _pick(cfg.get("path_capture"),
+                                allowed=("full", "basename", "none"),
+                                absent="full", invalid="none")
     return cfg
+
+
+def _pick(value, allowed, absent, invalid):
+    """Resolve a free-text capture-mode setting to one of `allowed`."""
+    if value is None:
+        return absent
+    normalised = str(value).strip().lower()
+    if not normalised:
+        return absent
+    if normalised in allowed:
+        return normalised
+    return invalid
 
 
 def telemetry_disabled():

@@ -432,6 +432,37 @@ def section_redaction_and_modes():
     R.truth("none path mode records no path at all",
             not event.get("folder_path") and not event.get("folder_name"))
 
+    # These two settings arrive as free text -- plugin.json's userConfig has no
+    # enum support -- so a typo has to land on the private side of the dial,
+    # not the permissive one. Capitalisation and stray whitespace are ordinary
+    # enough to be worth normalising rather than punishing.
+    clear_spool()
+    emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4d",
+          "cwd": TMP, "prompt": "casing should still be understood"},
+         QH_TELEMETRY_PROMPT_CAPTURE=" Hash ")
+    wait_for(lambda: spool_count() >= 1)
+    event = (spool_events() or [{}])[0]
+    R.truth("' Hash ' normalises to hash mode",
+            "prompt_preview" not in event and len(event.get("prompt_sha256", "")) == 64)
+
+    clear_spool()
+    emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4e",
+          "cwd": TMP, "prompt": "a typo must not widen capture"},
+         QH_TELEMETRY_PROMPT_CAPTURE="preveiw")
+    wait_for(lambda: spool_count() >= 1)
+    event = (spool_events() or [{}])[0]
+    R.truth("unrecognised prompt mode falls back to hash, not preview",
+            "prompt_preview" not in event)
+
+    clear_spool()
+    emit({"hook_event_name": "UserPromptSubmit", "session_id": "s4f",
+          "cwd": "/Users/x/src/qh-platform", "prompt": "hi"},
+         QH_TELEMETRY_PATH_CAPTURE="basenmae")
+    wait_for(lambda: spool_count() >= 1)
+    event = (spool_events() or [{}])[0]
+    R.truth("unrecognised path mode falls back to none, not full",
+            not event.get("folder_path") and not event.get("folder_name"))
+
 
 # ===========================================================================
 # 6-7. Opt-out and robustness

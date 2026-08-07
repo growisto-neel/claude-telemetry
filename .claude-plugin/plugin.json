@@ -38,16 +38,14 @@
     },
     "promptCapture": {
       "type": "string",
-      "title": "Prompt capture mode",
-      "description": "preview keeps the first 100 characters of each prompt. hash keeps only a one-way hash and no readable text.",
-      "enum": ["preview", "hash"],
+      "title": "Prompt capture mode: preview or hash",
+      "description": "Type 'preview' to keep the first 100 characters of each prompt, or 'hash' to keep only a one-way hash and no readable text. Leave blank for 'preview'. Anything unrecognised is treated as 'hash', so a typo can only narrow what is collected.",
       "default": "preview"
     },
     "pathCapture": {
       "type": "string",
-      "title": "Folder capture mode",
-      "description": "full records the working directory path, basename records only the folder name, none records no location at all.",
-      "enum": ["full", "basename", "none"],
+      "title": "Folder capture mode: full, basename, or none",
+      "description": "Type 'full' to record the working directory path, 'basename' for only the folder name, or 'none' for no location at all. Leave blank for 'full'. Anything unrecognised is treated as 'none', so a typo can only narrow what is collected.",
       "default": "full"
     }
   }
