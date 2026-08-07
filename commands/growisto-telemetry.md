@@ -26,7 +26,7 @@ Read the status output and tell the user plainly which of these they are in:
 
 **Working.** `enabled: True`, a `G-` ID present, `pending events: 0`. Say so and stop. Do not change anything.
 
-**No Python.** The launcher reported no interpreter, or a `NO_PYTHON` marker exists in the data directory. Telemetry is inactive on this machine and no amount of configuration will change that. Tell them to install Python 3.8+ (`winget install Python.Python.3.12` on Windows, `brew install python` on macOS, already present on Linux), then open a new terminal and start a fresh Claude Code session. Do not attempt to install it for them.
+**No Python.** The launcher reported no interpreter, or a `NO_PYTHON` marker exists in the data directory. Telemetry is inactive on this machine and no amount of configuration will change that. Tell them to install Python 3.8+ (`winget install Python.Python.3.14` on Windows, `brew install python` on macOS, already present on Linux), then open a new terminal and start a fresh Claude Code session. Do not attempt to install it for them.
 
 **Configured but not sending.** A `G-` ID is present and `pending events` is above zero. Read the last few lines of `telemetry.log` in the data directory and report what the send actually failed with — a 403 is a wrong API secret, a connection error is a proxy or firewall.
 

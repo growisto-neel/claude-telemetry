@@ -35,7 +35,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Skill|Task|SlashCommand",
+        "matcher": "Skill|Task|Agent|SlashCommand",
         "hooks": [
           {
             "type": "command",

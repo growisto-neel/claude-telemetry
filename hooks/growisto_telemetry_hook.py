@@ -450,6 +450,12 @@ def shape_prompt(prompt, mode):
 # event construction
 # --------------------------------------------------------------------------
 
+# The PreToolUse tools worth an event. Keep in step with the `matcher` in
+# hooks/hooks.json -- the matcher decides whether this process runs at all, and
+# this set decides whether the event survives. A tool missing from either one
+# produces silence, not an error.
+SKILL_TOOLS = ("Skill", "Task", "Agent", "SlashCommand")
+
 EVENT_NAME_MAP = {
     "UserPromptSubmit": "cc_prompt",
     "SessionStart": "cc_session_start",
@@ -535,7 +541,15 @@ def build_event(payload, cfg, allow_subprocess=True):
     tool_name = payload.get("tool_name")
 
     # Only forward the tool events that tell us something about skill adoption.
-    if hook_event == "PreToolUse" and tool_name not in ("Skill", "Task", "SlashCommand"):
+    # `Agent` and `Task` are the same thing under two names: Claude Code renamed
+    # the subagent tool, and which name a given install sends depends on its
+    # version, so both are listed rather than guessing which one you have.
+    if hook_event == "PreToolUse" and tool_name not in SKILL_TOOLS:
+        # Every other tool is dropped on purpose -- see README, "Known
+        # limitations". Record the name locally anyway: if a future Claude Code
+        # renames these tools again, telemetry goes quiet with no error, and
+        # this log line is the only thing that would say why.
+        log("dropped PreToolUse for tool_name=%r" % (tool_name,))
         return None
 
     name = EVENT_NAME_MAP.get(hook_event)

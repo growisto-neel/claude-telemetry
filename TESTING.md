@@ -71,7 +71,7 @@ You want `enabled: True`, your email with a plausible source, `prompt capture: p
 
 If it reports **not configured**, the values you entered at install did not reach the hook as environment variables. `/growisto-telemetry` will offer to write `config.json` directly, which fixes it. Tell Neel if this happens — it means the plugin manifest needs adjusting for everyone, not just you.
 
-If it reports **no Python**, that machine cannot run the hook at all. Install Python 3.8+ (`winget install Python.Python.3.12` on Windows, `brew install python` on macOS), open a new terminal, and start a fresh session.
+If it reports **no Python**, that machine cannot run the hook at all. Install Python 3.8+ (`winget install Python.Python.3.14` on Windows, `brew install python` on macOS), open a new terminal, and start a fresh session.
 
 ## Step 6 — Confirm events arrive
 
@@ -91,7 +91,7 @@ Standard reports and Explore lag 24–48 hours on a new property, and registered
 
 **Prompts sent but no events at all.** You're probably in a session that started before the plugin was installed. Hooks load at session start; restart Claude Code.
 
-**Skill events missing, prompt events fine.** Skills are captured through `PreToolUse` filtered to `Skill`, `Task`, and `SlashCommand`. A skill Claude loaded without a tool call won't produce one.
+**Skill events missing, prompt events fine.** Skills are captured through `PreToolUse` filtered to `Skill`, `Task`, `Agent`, and `SlashCommand`. A skill Claude loaded without a tool call won't produce one. If none of the four names match what your Claude Code version actually sends, the filter drops everything silently — `telemetry.log` will show a `dropped PreToolUse for tool_name=...` line naming the real tool.
 
 ## Before rolling out to the team
 
