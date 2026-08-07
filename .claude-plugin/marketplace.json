@@ -1,18 +1,18 @@
 {
-  "name": "qualified-health",
+  "name": "growisto",
   "owner": {
-    "name": "Qualified Health Platform",
-    "email": "platform@qualifiedhealthai.com"
+    "name": "Growisto",
+    "email": "neel.thakkar@growisto.com"
   },
   "metadata": {
-    "description": "Internal Claude Code plugins for Qualified Health.",
+    "description": "Internal Claude Code plugins for Growisto.",
     "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "qh-claude-telemetry",
       "source": "./",
-      "description": "Records Claude Code usage (prompt preview, skill, folder, session) to QH analytics. Never records full prompts, responses, or file contents.",
+      "description": "Records Claude Code usage (prompt preview, skill, folder, session) to Growisto analytics. Never records full prompts, responses, or file contents.",
       "version": "0.2.0",
       "category": "internal"
     }

@@ -22,7 +22,7 @@ Those 100 characters are still free text, so whatever you happen to open with en
 
 **If you work with customer data or PHI:** don't paste real records into a prompt. Use synthetic or de-identified examples. That was already the rule. A 100-character window is a much smaller exposure than a whole prompt, but it isn't zero — and pasted records tend to start with the identifying fields.
 
-**Where it goes.** The 100-character preview, prompt length, folder path, and the rest of the fields above go to Google Analytics for dashboards[, and to BigQuery, `analytics.claude_code_events`, in our own GCP project, retained for [90] days with access restricted to [the platform team]]. Both destinations receive the same record; neither one holds more than the other.
+**Where it goes.** The 100-character preview, prompt length, folder path, and the rest of the fields above go to a Google Analytics property owned by [Growisto], and nowhere else. There is no data warehouse and no second copy. Retention is whatever GA4 is set to, currently [set this deliberately and state the number here].
 
 **What it's used for:** understanding adoption and improving the tooling. It is not used for individual performance evaluation. [Confirm this is actually true and that the people who own headcount decisions agree, or delete this line — a promise like this is worse than no promise if it isn't held.]
 
@@ -40,7 +40,7 @@ On Windows:
 setx QH_TELEMETRY 0       # then open a new terminal; setx never affects the current one
 ```
 
-To remove it entirely, run `./uninstall.sh --purge`, or on Windows `.\uninstall.ps1 -Purge`.
+To remove it entirely, run `/plugin uninstall qh-claude-telemetry`.
 
 Everything the tool has queued to send lives in plain text on your own machine, so you can read exactly what it's reporting — `~/.qh-claude-telemetry/` on Linux and macOS, `%USERPROFILE%\.qh-claude-telemetry\` on Windows. Running the hook with `--status` shows the current configuration:
 
@@ -51,7 +51,7 @@ py -3 $env:USERPROFILE\.qh-claude-telemetry\qh_telemetry_hook.py --status # Wind
 
 If you use both Windows and WSL, note that they are separate installs with separate data directories. Turning telemetry off in one does not turn it off in the other.
 
-Questions, or think we've drawn the line in the wrong place — [#platform-eng] or [Neel].
+Questions, or think we've drawn the line in the wrong place — talk to Neel (neel.thakkar@growisto.com).
 
 ---
 
@@ -59,14 +59,14 @@ Questions, or think we've drawn the line in the wrong place — [#platform-eng] 
 
 A few things to settle before this goes out, in rough order of how much trouble they cause if skipped.
 
-Google Analytics is not covered by a Google BAA, and Google's terms prohibit sending personally identifiable information to it. This deployment sends `user_email` to GA4 as a custom dimension, which is PII under those terms. It's common practice and rarely enforced, but it is a terms violation and the property is technically at risk. The `user_email_sha256` field exists as the compliant alternative — you'd keep a lookup table on your side to resolve identities in BigQuery and let GA4 dashboards operate on the hash. Worth doing if GA4 becomes load-bearing.
+Google Analytics is not covered by a Google BAA, and Google's terms prohibit sending personally identifiable information to it. This deployment sends `user_email` to GA4 as a custom dimension, which is PII under those terms. It's common practice and rarely enforced, but it is a terms violation and the property is technically at risk. The `user_email_sha256` field exists as the compliant alternative — you'd keep a lookup table on your own side to resolve identities and let GA4 dashboards operate only on the hash. Worth doing if GA4 becomes load-bearing.
 
 Employee monitoring notice requirements vary by jurisdiction. If you have staff in the EU or UK, a prompt fragment tied to a named individual is still personal data under GDPR and needs a lawful basis and a record in your processing register; the 100-character cap makes a DPIA easier to argue your way out of than full-prompt capture would, but the identity field is what triggers most of the obligation, not the prompt length. Illinois, California, Colorado, and Connecticut have their own notice rules. Anyone in Germany with a works council needs consultation before this ships. Get an answer for the jurisdictions you actually employ in rather than assuming the US default.
 
 If you deploy through managed settings so the hook can't be removed, the opt-out paragraph above becomes false and needs to come out — and mandatory monitoring generally carries a higher disclosure bar than opt-in. Don't leave a stale opt-out promise in a notice about a system that doesn't honor it.
 
-Decide the retention period on purpose and set it on the BigQuery partition expiration, rather than accumulating previews indefinitely by default. Ninety days is a reasonable starting point for adoption analysis. Note that GA4 has its own retention setting (Admin → Data collection and modification → Data retention) which defaults to two months for event-level data — set it deliberately too, since in direct mode that is your only retention control.
+Decide the retention period on purpose rather than accumulating previews indefinitely by default. GA4's setting is at Admin → Data collection and modification → Data retention, and it defaults to two months for event-level data. Since GA4 is the only destination, that setting is your only retention control, and whatever you choose is the number that belongs in the notice above.
 
-If someone asks you to raise the 100-character limit, treat that as a policy decision rather than a config change. The cap is load-bearing for every claim in the employee notice above, and the code has no full-text path to re-enable — restoring one means editing the hook, the collector model, and the BigQuery schema, which is the right amount of friction.
+If someone asks you to raise the 100-character limit, treat that as a policy decision rather than a config change. The cap is load-bearing for every claim in the employee notice above, and the code has no full-text path to re-enable — restoring one means editing both the hook and the collector model, which is the right amount of friction.
 
 Last thing, and it's the one most likely to bite: if prompt fragments are logged with names attached and people believe the logs might be read by their manager, they will change what they ask Claude. You'll lose exactly the honest usage signal you built this to capture, and you won't be able to tell that it happened. Consider whether team-level rollups on the hashed identity would answer your actual questions — most adoption questions don't need per-person prompt text, and the version people trust is the version that keeps working.

@@ -1,12 +1,12 @@
 {
   "name": "qh-claude-telemetry",
   "version": "0.2.0",
-  "description": "Records Claude Code usage (prompt preview, skill, folder, session) and reports it to Qualified Health analytics. Never records full prompts, responses, or file contents.",
+  "description": "Records Claude Code usage (prompt preview, skill, folder, session) and reports it to Growisto analytics. Never records full prompts, responses, or file contents.",
   "author": {
-    "name": "Qualified Health Platform",
-    "email": "platform@qualifiedhealthai.com"
+    "name": "Growisto",
+    "email": "neel.thakkar@growisto.com"
   },
-  "homepage": "https://github.com/qualifiedhealth/qh-claude-telemetry",
+  "homepage": "https://github.com/growisto-neel/claude-telemetry",
   "license": "UNLICENSED",
   "keywords": ["telemetry", "analytics", "internal"],
 
@@ -14,7 +14,7 @@
     "ga4MeasurementId": {
       "type": "string",
       "title": "GA4 measurement ID",
-      "description": "The G- ID of the Qualified Health analytics property. Ask #platform-eng if you do not have it.",
+      "description": "The G- ID of the Growisto analytics property. Ask Neel if you do not have it.",
       "default": ""
     },
     "ga4ApiSecret": {

@@ -2,7 +2,7 @@
 description: Check QH telemetry status, or finish configuring it if credentials did not carry over from install
 ---
 
-Report the state of the QH Claude Code telemetry plugin for this user, and repair its configuration if it is incomplete.
+Report the state of the Growisto Claude Code telemetry plugin for this user, and repair its configuration if it is incomplete.
 
 ## 1. Report status
 
@@ -36,7 +36,7 @@ Read the status output and tell the user plainly which of these they are in:
 
 ## 3. Repair configuration, only if step 2 landed on "not configured"
 
-Ask the user for the GA4 measurement ID and API secret, telling them to get both from #platform-eng if they do not have them. Ask for their work email and team, offering their `git config user.email` as the default.
+Ask the user for the GA4 measurement ID and API secret, telling them to get both from Neel if they do not have them. Ask for their work email and team, offering their `git config user.email` as the default.
 
 Then write `config.json` into the telemetry data directory — `$QH_TELEMETRY_DIR` if set, otherwise `~/.qh-claude-telemetry/` on Linux and macOS or `%USERPROFILE%\.qh-claude-telemetry\` on Windows — with exactly these keys:
 

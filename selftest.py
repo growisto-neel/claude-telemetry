@@ -2,18 +2,24 @@
 """
 Self-test for the QH Claude Code telemetry hook. Linux, macOS, and Windows.
 
-Runs entirely in a temp directory against a fake settings file, sends no
-network traffic, and touches nothing in your real ~/.claude or
-~/.qh-claude-telemetry. Run this before rolling out to anyone.
+Runs entirely in a temp directory, sends no network traffic, and touches
+nothing in your real ~/.qh-claude-telemetry. Run this before rolling out to
+anyone.
 
     python3 selftest.py          (macOS / Linux)
     py -3 selftest.py            (Windows)
 
-This is the canonical suite. selftest.sh is a thin wrapper around it so older
-instructions keep working. Everything here is stdlib and platform-neutral;
-checks that only make sense on one platform announce themselves as SKIP on the
-others rather than silently disappearing, so a Windows run and a Linux run can
-be compared line by line.
+Hook registration now belongs to the plugin (hooks/hooks.json plus the
+bin/qh-hook launcher), so nothing here installs, merges, or removes anything
+from settings.json. What is left is the behaviour of the hook itself.
+
+Everything here is stdlib and platform-neutral; checks that only make sense on
+one platform announce themselves as SKIP on the others rather than silently
+disappearing, so a Windows run and a Linux run can be compared line by line.
+
+Twelve areas are covered: syntax, event capture, noise filtering, redaction,
+capture modes, opt-out, session safety, GA4 payload shape, crash recovery,
+partial failure, platform behaviour, and paths containing spaces.
 
 Exit code is 0 only if every check passed.
 """
@@ -34,13 +40,15 @@ IS_WINDOWS = os.name == "nt"
 REPO = os.path.dirname(os.path.abspath(__file__))
 PY = sys.executable
 
+SELFTEST_SRC = os.path.abspath(__file__)
 HOOK_SRC = os.path.join(REPO, "hooks", "qh_telemetry_hook.py")
-CONFIGURE_SRC = os.path.join(REPO, "tools", "qh_configure.py")
 COLLECTOR_SRC = os.path.join(REPO, "collector", "main.py")
+LAUNCHER_SRC = os.path.join(REPO, "bin", "qh-hook")
 
-# Names qh_configure.py reads config values from. Stripped from every child
-# environment so a developer who happens to have GA4_API_SECRET exported does
-# not accidentally point the self-test at real analytics.
+# bin/qh-hook adopts several of these bare names as fallbacks for its
+# QH_TELEMETRY_* equivalents. Stripped from every child environment so a
+# developer who happens to have GA4_API_SECRET exported does not accidentally
+# point the self-test at real analytics.
 CONFIG_ENV_NAMES = (
     "COLLECTOR_URL", "COLLECTOR_TOKEN", "GA4_MEASUREMENT_ID", "GA4_API_SECRET",
     "USER_EMAIL", "TEAM", "PROMPT_CAPTURE", "PATH_CAPTURE",
@@ -124,8 +132,8 @@ class Report:
             for failure in self.failures:
                 print("  - %s" % failure)
             return 1
-        print("All good. Nothing in your real ~/.claude or "
-              "~/.qh-claude-telemetry was touched.")
+        print("All good. Nothing in your real ~/.qh-claude-telemetry was "
+              "touched.")
         return 0
 
 
@@ -138,16 +146,12 @@ R = Report()
 
 TMP = tempfile.mkdtemp(prefix="qh-selftest-")
 TEL_DIR = os.path.join(TMP, "telemetry")
-SETTINGS = os.path.join(TMP, "claude", "settings.json")
 HOOK = os.path.join(TEL_DIR, "qh_telemetry_hook.py")
-CONFIGURE = os.path.join(TEL_DIR, "qh_configure.py")
-CONFIG_PATH = os.path.join(TEL_DIR, "config.json")
 SPOOL = os.path.join(TEL_DIR, "spool.ndjson")
 
 # The hook resolves its paths from the environment at import time, so this must
 # be set before the module is loaded further down.
 os.environ["QH_TELEMETRY_DIR"] = TEL_DIR
-os.environ["CLAUDE_SETTINGS_PATH"] = SETTINGS
 for _name in list(os.environ):
     if _name.startswith("QH_TELEMETRY_") and _name != "QH_TELEMETRY_DIR":
         del os.environ[_name]
@@ -159,7 +163,6 @@ def child_env(**extra):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("QH_TELEMETRY") and k not in CONFIG_ENV_NAMES}
     env["QH_TELEMETRY_DIR"] = TEL_DIR
-    env["CLAUDE_SETTINGS_PATH"] = SETTINGS
     for key, value in extra.items():
         if value is None:
             env.pop(key, None)
@@ -230,65 +233,33 @@ def clear_spool():
             pass
 
 
-def read_settings():
-    with open(SETTINGS, encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def count_our_hooks(settings):
-    return sum(1
-               for groups in settings.get("hooks", {}).values()
-               for group in groups
-               if isinstance(group, dict)
-               for entry in group.get("hooks", [])
-               if "qh_telemetry_hook.py" in entry.get("command", ""))
-
-
-def count_hooks_matching(settings, needle):
-    return sum(1
-               for groups in settings.get("hooks", {}).values()
-               for group in groups
-               if isinstance(group, dict)
-               for entry in group.get("hooks", [])
-               if needle in entry.get("command", ""))
-
-
-def do_install(email="tester@qualifiedhealthai.com", team="selftest",
-               settings=SETTINGS, base=TEL_DIR, **cfg):
+def do_install(email="tester@growisto.com", team="selftest",
+               base=TEL_DIR, **cfg):
     """
-    Install the way install.sh and install.ps1 do: copy the files, then call
-    qh_configure. Going through the shared module rather than through one of the
-    two shell front ends is what makes this suite identical on all platforms.
+    Lay out a temp install the way the plugin looks at runtime: a config.json
+    in BASE_DIR, next to a copy of the hook for the tests to invoke directly.
+
+    There is no settings.json step any more. The plugin declares its own hooks
+    in hooks/hooks.json, so registration is not this suite's business; what is
+    left is making sure the hook reads its configuration and behaves.
     """
     os.makedirs(base, exist_ok=True)
-    os.makedirs(os.path.dirname(settings), exist_ok=True)
-    hook_dest = os.path.join(base, "qh_telemetry_hook.py")
-    shutil.copy2(HOOK_SRC, hook_dest)
-    shutil.copy2(CONFIGURE_SRC, os.path.join(base, "qh_configure.py"))
+    shutil.copy2(HOOK_SRC, os.path.join(base, "qh_telemetry_hook.py"))
 
-    env = child_env()
-    env["QH_TELEMETRY_DIR"] = base
-    env["CLAUDE_SETTINGS_PATH"] = settings
-    env["USER_EMAIL"] = email
-    env["TEAM"] = team
-    env["PROMPT_CAPTURE"] = cfg.get("prompt_capture", "preview")
-    env["PATH_CAPTURE"] = cfg.get("path_capture", "full")
+    config = {
+        "user_email": email,
+        "team": team,
+        "prompt_capture": cfg.get("prompt_capture", "preview"),
+        "path_capture": cfg.get("path_capture", "full"),
+    }
     for key in ("collector_url", "collector_token",
                 "ga4_measurement_id", "ga4_api_secret"):
         if cfg.get(key):
-            env[key.upper()] = cfg[key]
+            config[key] = cfg[key]
 
-    first = run([PY, CONFIGURE_SRC, "write-config",
-                 "--config", os.path.join(base, "config.json"),
-                 "--hook", hook_dest], env=env)
-    second = run([PY, CONFIGURE_SRC, "install-hooks",
-                  "--settings", settings, "--hook", hook_dest,
-                  "--python", PY], env=env)
-    return first, second
-
-
-def do_uninstall(settings=SETTINGS):
-    return run([PY, CONFIGURE_SRC, "remove-hooks", "--settings", settings])
+    with open(os.path.join(base, "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(config, fh, indent=2)
+    return config
 
 
 def wait_for(predicate, seconds=10.0, interval=0.1):
@@ -308,8 +279,8 @@ def wait_for(predicate, seconds=10.0, interval=0.1):
 def section_syntax():
     R.section("1. Syntax")
 
-    for label, path in (("hook", HOOK_SRC),
-                        ("qh_configure", CONFIGURE_SRC),
+    for label, path in (("selftest", SELFTEST_SRC),
+                        ("hook", HOOK_SRC),
                         ("collector", COLLECTOR_SRC)):
         if not os.path.exists(path):
             R.bad("%s missing at %s" % (label, path))
@@ -324,88 +295,26 @@ def section_syntax():
         except SyntaxError as exc:
             R.bad("%s does not compile: %s line %s" % (label, exc.msg, exc.lineno))
 
+    # The launcher is the only shell script left, and it is what Claude Code
+    # actually runs on all three platforms.
     bash = shutil.which("bash")
-    for script in ("install.sh", "uninstall.sh", "selftest.sh"):
-        path = os.path.join(REPO, script)
-        if not os.path.exists(path):
-            R.bad("%s is missing" % script)
-        elif not bash:
-            R.skip("%s syntax" % script, "no bash on this machine")
-        else:
-            proc = run([bash, "-n", path])
-            R.truth("%s syntax" % script, proc.returncode == 0)
-
-    powershell = shutil.which("pwsh") or shutil.which("powershell")
-    for script in ("install.ps1", "uninstall.ps1", "selftest.ps1"):
-        path = os.path.join(REPO, script)
-        if not os.path.exists(path):
-            R.bad("%s is missing" % script)
-        elif not powershell:
-            R.skip("%s syntax" % script, "no PowerShell on this machine")
-        else:
-            # Parse without executing. The parser is the same one PowerShell
-            # itself uses, so this catches anything that would fail to load.
-            probe = (
-                "$errors = $null; "
-                "$null = [System.Management.Automation.Language.Parser]::ParseFile("
-                "'%s', [ref]$null, [ref]$errors); "
-                "if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Host $_ }; exit 1 }"
-                % path.replace("'", "''")
-            )
-            proc = run([powershell, "-NoProfile", "-NonInteractive", "-Command", probe])
-            R.truth("%s parses" % script, proc.returncode == 0)
-            if proc.returncode != 0:
-                print("      %s" % proc.stdout.decode("utf-8", "replace").strip()[:300])
+    if not os.path.exists(LAUNCHER_SRC):
+        R.bad("bin/qh-hook is missing")
+    elif not bash:
+        R.skip("bin/qh-hook syntax", "no bash on this machine")
+    else:
+        proc = run([bash, "-n", LAUNCHER_SRC])
+        R.truth("bin/qh-hook syntax", proc.returncode == 0)
+        if proc.returncode != 0:
+            print("      %s" % proc.stderr.decode("utf-8", "replace").strip()[:300])
 
 
 # ===========================================================================
-# 2-3. Installer
-# ===========================================================================
-
-def section_installer():
-    R.section("2. Installer preserves pre-existing hooks")
-
-    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-    with open(SETTINGS, "w", encoding="utf-8") as fh:
-        json.dump({
-            "model": "opus",
-            "hooks": {
-                "PreToolUse": [
-                    {"matcher": "Bash",
-                     "hooks": [{"type": "command",
-                                "command": "/usr/local/bin/my-audit.sh"}]}
-                ]
-            }
-        }, fh, indent=2)
-
-    do_install()
-    settings = read_settings()
-
-    R.check("unrelated setting survived", settings.get("model"), "opus")
-    R.check("pre-existing Bash hook survived",
-            count_hooks_matching(settings, "my-audit"), 1)
-    R.check("all four events wired",
-            len({"UserPromptSubmit", "SessionStart", "SessionEnd", "PreToolUse"}
-                & set(settings["hooks"])), 4)
-    matcher = next((g.get("matcher") for g in settings["hooks"]["PreToolUse"]
-                    if "qh_telemetry_hook.py" in json.dumps(g)), None)
-    R.check("PreToolUse matcher targets skills", matcher, "Skill|Task|SlashCommand")
-    R.truth("a backup of the previous settings was written",
-            bool(glob.glob(SETTINGS + ".bak.*")))
-
-    R.section("3. Installer is idempotent")
-    do_install()
-    do_install()
-    R.check("no duplicate hook entries after 3 installs",
-            count_our_hooks(read_settings()), 4)
-
-
-# ===========================================================================
-# 4-5. Event capture
+# 2-3. Event capture
 # ===========================================================================
 
 def section_capture():
-    R.section("4. Event capture")
+    R.section("2. Event capture")
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s1", "cwd": TMP,
@@ -435,14 +344,14 @@ def section_capture():
             by_name.get("cc_skill", {}).get("skill"),
             "qh-prototypes:create-backend")
     R.check("email from config", events[0].get("user_email"),
-            "tester@qualifiedhealthai.com")
+            "tester@growisto.com")
     R.check("team recorded", events[0].get("team"), "selftest")
     R.check("session_source recorded",
             by_name.get("cc_session_start", {}).get("session_source"), "startup")
     R.check("no internal _fields leaked",
             sum(1 for e in events for k in e if k.startswith("_")), 0)
 
-    R.section("5. Noise is filtered out")
+    R.section("3. Noise is filtered out")
     before = spool_count()
     emit({"hook_event_name": "PreToolUse", "session_id": "s1", "cwd": TMP,
           "tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/x"}})
@@ -453,11 +362,11 @@ def section_capture():
 
 
 # ===========================================================================
-# 6-7. Redaction and capture modes
+# 4-5. Redaction and capture modes
 # ===========================================================================
 
 def section_redaction_and_modes():
-    R.section("6. Secret redaction")
+    R.section("4. Secret redaction")
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s2", "cwd": TMP,
@@ -467,7 +376,7 @@ def section_redaction_and_modes():
     R.truth("api key redacted", "sk-abcdefghij0123456789XYZ" not in preview)
     R.truth("password redacted", "hunter2trustme" not in preview)
 
-    R.section("7. Capture modes")
+    R.section("5. Capture modes")
 
     # The core guarantee: a long prompt is truncated to 100 characters, and
     # prompt_chars still reports the true length so you know there was more.
@@ -525,11 +434,11 @@ def section_redaction_and_modes():
 
 
 # ===========================================================================
-# 8-9. Opt-out and robustness
+# 6-7. Opt-out and robustness
 # ===========================================================================
 
 def section_optout_and_robustness():
-    R.section("8. Opt-out")
+    R.section("6. Opt-out")
 
     clear_spool()
     emit({"hook_event_name": "UserPromptSubmit", "session_id": "s5", "cwd": TMP,
@@ -546,7 +455,7 @@ def section_optout_and_robustness():
     R.check("DISABLED file records nothing", spool_count(), 0)
     os.unlink(disabled)
 
-    R.section("9. Never breaks the session")
+    R.section("7. Never breaks the session")
 
     proc = emit(b"this is not json at all {{{")
     R.check("malformed stdin exits 0", proc.returncode, 0)
@@ -579,14 +488,14 @@ def section_optout_and_robustness():
 
 
 # ===========================================================================
-# 10. GA4 payload shape
+# 8. GA4 payload shape
 # ===========================================================================
 
 def section_ga4(hook):
-    R.section("10. GA4 payload shape")
+    R.section("8. GA4 payload shape")
 
     cfg = {"prompt_capture": "preview", "path_capture": "full",
-           "user_email": "t@qualifiedhealthai.com"}
+           "user_email": "t@growisto.com"}
     event = hook.build_event({
         "hook_event_name": "UserPromptSubmit",
         "session_id": "ga4",
@@ -611,11 +520,11 @@ def section_ga4(hook):
 
 
 # ===========================================================================
-# 11-12. Recovery, odd shapes, partial failure
+# 9-10. Recovery and partial failure
 # ===========================================================================
 
 def section_recovery(hook):
-    R.section("11. Crash recovery and odd settings shapes")
+    R.section("9. Crash recovery")
 
     # A flusher killed mid-send leaves a .sending file; those events must return.
     clear_spool()
@@ -629,29 +538,7 @@ def section_recovery(hook):
     R.check("orphaned .sending events recovered", spool_count(), 1)
     R.check("orphan file cleaned up", len(glob.glob(SPOOL + ".sending.*")), 0)
 
-    # Settings groups with unusual shapes must survive the installer untouched.
-    with open(SETTINGS, "w", encoding="utf-8") as fh:
-        json.dump({
-            "hooks": {
-                "PreToolUse": [
-                    {"matcher": "NoHooksKey"},
-                    {"matcher": "EmptyHooks", "hooks": []},
-                    {"matcher": "Bash",
-                     "hooks": [{"type": "command",
-                                "command": "/usr/local/bin/my-audit.sh"}]},
-                ]
-            }
-        }, fh, indent=2)
-    do_install()
-    groups = read_settings()["hooks"]["PreToolUse"]
-    R.check("group with no hooks key preserved",
-            sum(1 for g in groups if g.get("matcher") == "NoHooksKey"), 1)
-    R.check("group with empty hooks list preserved",
-            sum(1 for g in groups if g.get("matcher") == "EmptyHooks"), 1)
-    R.check("unrelated Bash hook preserved",
-            count_hooks_matching(read_settings(), "my-audit"), 1)
-
-    R.section("12. Partial failure does not duplicate")
+    R.section("10. Partial failure does not duplicate")
     # Collector unreachable, GA4 unset: the event must be requeued exactly once
     # and must not be marked delivered to a destination that never received it.
     clear_spool()
@@ -668,34 +555,11 @@ def section_recovery(hook):
 
 
 # ===========================================================================
-# 13. Uninstall
+# 11. Platform behaviour
 # ===========================================================================
 
-def section_uninstall():
-    R.section("13. Uninstall")
-
-    do_uninstall()
-    settings = read_settings()
-    R.check("telemetry hooks removed", count_our_hooks(settings), 0)
-    R.check("pre-existing Bash hook still there after uninstall",
-            count_hooks_matching(settings, "my-audit"), 1)
-
-    # Removing twice, and removing from a file that never had us, must both be
-    # harmless: employees do re-run uninstallers.
-    proc = do_uninstall()
-    R.check("second uninstall is harmless", proc.returncode, 0)
-
-    missing = os.path.join(TMP, "no-such-dir", "settings.json")
-    proc = do_uninstall(settings=missing)
-    R.check("uninstall with no settings file exits cleanly", proc.returncode, 0)
-
-
-# ===========================================================================
-# 14. Platform behaviour
-# ===========================================================================
-
-def section_platform(hook, configure):
-    R.section("14. Platform behaviour (%s)" % ("windows" if IS_WINDOWS else "posix"))
+def section_platform(hook):
+    R.section("11. Platform behaviour (%s)" % ("windows" if IS_WINDOWS else "posix"))
 
     R.check("hook agrees with the interpreter about the platform",
             hook.IS_WINDOWS, IS_WINDOWS)
@@ -864,153 +728,66 @@ def section_platform(hook, configure):
     with open(SPOOL, "rb") as fh:
         R.truth("the real spool uses LF endings too", b"\r\n" not in fh.read())
 
-    # --- command quoting ----------------------------------------------------
-    quoted = configure.command_string(
-        r"C:\Program Files\Python312\python.exe",
-        r"C:\Users\Firstname Lastname\.qh-claude-telemetry\qh_telemetry_hook.py")
-    R.check("hook command quotes both paths", quoted,
-            '"C:\\Program Files\\Python312\\python.exe" '
-            '"C:\\Users\\Firstname Lastname\\.qh-claude-telemetry\\qh_telemetry_hook.py"')
-
 
 # ===========================================================================
-# 15. Install into a path containing a space, then run what settings.json says
+# 12. A base directory whose path contains a space
 # ===========================================================================
 
 def section_spaces():
-    R.section("15. Paths with spaces")
+    R.section("12. Paths with spaces")
 
+    # "C:\Users\Firstname Lastname\..." is the normal case on Windows, and a
+    # space in the base directory is what breaks naive quoting: the hook keeps
+    # running, writes its spool somewhere else or nowhere, and everything still
+    # looks installed. Worth its own check even without an installer.
     base = os.path.join(TMP, "Telemetry Dir", ".qh-claude-telemetry")
-    settings = os.path.join(TMP, "Claude Home", ".claude", "settings.json")
-    do_install(email="spaces@qualifiedhealthai.com", team="spaces",
-               base=base, settings=settings)
+    do_install(email="spaces@growisto.com", team="spaces", base=base)
+    spaced_spool = os.path.join(base, "spool.ndjson")
 
-    with open(settings, encoding="utf-8") as fh:
-        installed = json.load(fh)
-    command = next(
-        (entry["command"]
-         for groups in installed.get("hooks", {}).values()
-         for group in groups if isinstance(group, dict)
-         for entry in group.get("hooks", [])
-         if "qh_telemetry_hook.py" in entry.get("command", "")),
-        None)
-    R.truth("a hook command was written", bool(command))
-    if not command:
-        return
-
-    # Claude Code hands the command to the platform shell, so this runs it the
-    # same way. If the quoting is wrong the shell splits on the space and the
-    # hook silently never fires -- the worst possible failure mode, because
-    # everything looks installed.
-    env = child_env()
-    env["QH_TELEMETRY_DIR"] = base
-    env["CLAUDE_SETTINGS_PATH"] = settings
     payload = json.dumps({"hook_event_name": "UserPromptSubmit",
                           "session_id": "spaced", "cwd": base,
-                          "prompt": "installed under a path with spaces"})
-    proc = subprocess.run(command, shell=True, input=payload.encode("utf-8"),
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          env=env, timeout=60)
-    R.check("the settings.json command runs through the shell", proc.returncode, 0)
+                          "prompt": "running under a path with spaces"})
+    proc = subprocess.run(
+        [PY, os.path.join(base, "qh_telemetry_hook.py")],
+        input=payload.encode("utf-8"),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=child_env(QH_TELEMETRY_DIR=base), timeout=60,
+    )
+    R.check("the hook runs from a spaced directory", proc.returncode, 0)
     R.check("it prints nothing into the session", proc.stdout, b"")
-
-    spaced_spool = os.path.join(base, "spool.ndjson")
     R.truth("it recorded the event",
             wait_for(lambda: spool_count(spaced_spool) >= 1, seconds=20))
     events = spool_events(spaced_spool)
     if events:
         R.check("recorded with the right identity",
-                events[0].get("user_email"), "spaces@qualifiedhealthai.com")
+                events[0].get("user_email"), "spaces@growisto.com")
 
-    run([PY, CONFIGURE_SRC, "remove-hooks", "--settings", settings])
-    with open(settings, encoding="utf-8") as fh:
-        R.check("uninstall works under a spaced path",
-                count_our_hooks(json.load(fh)), 0)
-
-
-# ===========================================================================
-# 16. The platform's own installer, end to end
-# ===========================================================================
-
-def section_native_installer():
-    R.section("16. Native installer end to end")
-
-    base = os.path.join(TMP, "native", ".qh-claude-telemetry")
-    settings = os.path.join(TMP, "native", ".claude", "settings.json")
-    os.makedirs(os.path.dirname(settings), exist_ok=True)
-    with open(settings, "w", encoding="utf-8") as fh:
-        json.dump({"hooks": {"PreToolUse": [
-            {"matcher": "Bash", "hooks": [
-                {"type": "command", "command": "/usr/local/bin/my-audit.sh"}]}
-        ]}}, fh, indent=2)
-
-    env = child_env()
-    env["QH_TELEMETRY_DIR"] = base
-    env["CLAUDE_SETTINGS_PATH"] = settings
-
+    # And the same thing through the launcher Claude Code actually invokes,
+    # which is where the quoting would go wrong. Skipped where a bash shell or
+    # a discoverable interpreter cannot be guaranteed.
+    bash = shutil.which("bash")
     if IS_WINDOWS:
-        powershell = shutil.which("pwsh") or shutil.which("powershell")
-        if not powershell:
-            R.skip("install.ps1 end to end", "no PowerShell on PATH")
-            return
-        install = [powershell, "-NoProfile", "-NonInteractive",
-                   "-ExecutionPolicy", "Bypass",
-                   "-File", os.path.join(REPO, "install.ps1"),
-                   "-NonInteractive",
-                   "-Email", "native@qualifiedhealthai.com",
-                   "-Team", "native"]
-        uninstall = [powershell, "-NoProfile", "-NonInteractive",
-                     "-ExecutionPolicy", "Bypass",
-                     "-File", os.path.join(REPO, "uninstall.ps1"), "-Purge"]
-        label = "install.ps1"
+        R.skip("bin/qh-hook under a spaced base directory",
+               "needs Git Bash with a discoverable Python")
+    elif not bash:
+        R.skip("bin/qh-hook under a spaced base directory", "no bash on this machine")
     else:
-        bash = shutil.which("bash")
-        if not bash:
-            R.skip("install.sh end to end", "no bash on PATH")
-            return
-        install = [bash, os.path.join(REPO, "install.sh"), "--non-interactive",
-                   "--email", "native@qualifiedhealthai.com", "--team", "native"]
-        uninstall = [bash, os.path.join(REPO, "uninstall.sh"), "--purge"]
-        label = "install.sh"
-
-    proc = run(install, env=env, timeout=180)
-    R.check("%s exits 0" % label, proc.returncode, 0)
-    if proc.returncode != 0:
-        print("      %s" % proc.stderr.decode("utf-8", "replace").strip()[:600])
-        return
-
-    output = (proc.stdout + proc.stderr).decode("utf-8", "replace")
-    R.truth("%s discloses the 100-character limit" % label,
-            "FIRST 100 CHARACTERS" in output)
-    R.truth("%s says how to opt out" % label, "QH_TELEMETRY" in output)
-    R.truth("%s verified itself" % label,
-            "hook captured the event correctly" in output)
-
-    with open(settings, encoding="utf-8") as fh:
-        installed = json.load(fh)
-    R.check("%s wired all four events" % label, count_our_hooks(installed), 4)
-    R.check("%s left the unrelated hook alone" % label,
-            count_hooks_matching(installed, "my-audit"), 1)
-    R.truth("%s installed the hook file" % label,
-            os.path.exists(os.path.join(base, "qh_telemetry_hook.py")))
-    R.truth("%s left a copy of qh_configure for removal" % label,
-            os.path.exists(os.path.join(base, "qh_configure.py")))
-
-    with open(os.path.join(base, "config.json"), encoding="utf-8") as fh:
-        config = json.load(fh)
-    R.check("%s recorded the identity" % label,
-            config.get("user_email"), "native@qualifiedhealthai.com")
-    R.truth("%s did not write a secret it was not given" % label,
-            not config.get("ga4_api_secret"))
-
-    proc = run(uninstall, env=env, timeout=180)
-    R.check("uninstaller exits 0", proc.returncode, 0)
-    with open(settings, encoding="utf-8") as fh:
-        remaining = json.load(fh)
-    R.check("uninstaller removed our hooks", count_our_hooks(remaining), 0)
-    R.check("uninstaller left the unrelated hook alone",
-            count_hooks_matching(remaining, "my-audit"), 1)
-    R.truth("--purge deleted the local data", not os.path.exists(base))
+        launcher_base = os.path.join(TMP, "Launcher Dir", ".qh-claude-telemetry")
+        do_install(email="launcher@growisto.com", team="spaces", base=launcher_base)
+        env = child_env(QH_TELEMETRY_DIR=launcher_base, QH_TELEMETRY_PYTHON=PY)
+        body = json.dumps({"hook_event_name": "UserPromptSubmit",
+                           "session_id": "launched", "cwd": launcher_base,
+                           "prompt": "launched under a path with spaces"})
+        proc = subprocess.run(
+            [bash, LAUNCHER_SRC], input=body.encode("utf-8"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, timeout=60,
+        )
+        R.check("bin/qh-hook exits 0", proc.returncode, 0)
+        R.check("bin/qh-hook prints nothing into the session", proc.stdout, b"")
+        launched_spool = os.path.join(launcher_base, "spool.ndjson")
+        R.truth("bin/qh-hook recorded the event",
+                wait_for(lambda: spool_count(launched_spool) >= 1, seconds=20))
 
 
 # ===========================================================================
@@ -1023,20 +800,20 @@ def main():
 
     try:
         section_syntax()
-        section_installer()
+
+        # Everything below runs against a temp BASE_DIR laid out the way the
+        # plugin lays one out at runtime.
+        do_install()
 
         hook = load_module("qh_hook_under_test", HOOK_SRC)
-        configure = load_module("qh_configure_under_test", CONFIGURE_SRC)
 
         section_capture()
         section_redaction_and_modes()
         section_optout_and_robustness()
         section_ga4(hook)
         section_recovery(hook)
-        section_uninstall()
-        section_platform(hook, configure)
+        section_platform(hook)
         section_spaces()
-        section_native_installer()
     except Exception as exc:
         import traceback
 

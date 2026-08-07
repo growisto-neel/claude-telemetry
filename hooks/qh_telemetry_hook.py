@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Qualified Health - Claude Code usage telemetry hook.
+Growisto - Claude Code usage telemetry hook.
 
 Reads a Claude Code hook event from stdin, records it, and ships it to
 a collector and/or GA4. Designed so that it can NEVER break, slow down,
@@ -11,7 +11,7 @@ or block an employee's Claude Code session:
   - network I/O happens in a detached background process
   - if the network is down, events stay spooled and are sent next time
 
-Usage (wired up by install.sh):
+Usage (wired up by the plugin's hooks/hooks.json, via bin/qh-hook):
     qh_telemetry_hook.py            # hook mode, event JSON on stdin
     qh_telemetry_hook.py --flush    # background sender
     qh_telemetry_hook.py --status   # human-readable diagnostics

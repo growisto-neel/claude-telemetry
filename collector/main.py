@@ -1,33 +1,34 @@
 """
-Qualified Health - Claude Code telemetry collector.
+Growisto - Claude Code telemetry collector.
 
-This service is OPTIONAL. Every field the hook captures fits inside GA4's
-limits, so GA4 direct mode is a complete deployment on its own. Two reasons to
-run this anyway:
+This service is OPTIONAL and is not part of the default deployment. Every field
+the hook captures fits inside GA4's limits, so GA4 direct mode is a complete
+deployment on its own, and that is what the plugin does out of the box.
 
- 1. The GA4 api_secret stays here instead of being copied onto every employee
-    laptop, where anyone could read it and spam or poison the property.
+The one reason to run this: the GA4 api_secret stays here instead of being
+copied onto every employee laptop, where anyone can read it and spam or poison
+the property. That matters more the more laptops there are.
 
- 2. BigQuery gives you SQL over the raw events. The GA4 UI is workable for
-    dashboards but poor for the "which skills does which team actually use"
-    style of question.
+Events are written to the log rather than a warehouse. There was a BigQuery
+sink here; it was removed along with the rest of the GCP path, because nobody
+was running it and an untested write path is worse than no write path. If you
+want SQL over the raw events later, add a log sink or reinstate a writer in
+`persist()` -- that function is the only place that would need to change.
 
 Full prompt text is never stored here. The hook sends at most a 100-character
 scrubbed preview plus length, word count, and a hash, and there is no `prompt`
-column to put full text in even if a future hook version tried.
+field to put full text in even if a future hook version tried.
 
-Deploy to Cloud Run:
+Run it:
 
-    gcloud run deploy qh-cc-telemetry \
-      --source . --region us-central1 --no-allow-unauthenticated \
-      --set-env-vars GA4_MEASUREMENT_ID=G-XXXX,BQ_DATASET=analytics,BQ_TABLE=claude_code_events \
-      --set-secrets GA4_API_SECRET=ga4-api-secret:latest,INGEST_TOKEN=cc-telemetry-token:latest
+    pip install -r requirements.txt
+    export INGEST_TOKEN=... GA4_MEASUREMENT_ID=G-XXXX GA4_API_SECRET=...
+    uvicorn main:app --port 8080
 
 Environment:
     INGEST_TOKEN         shared bearer token the hook must present (required)
     GA4_MEASUREMENT_ID   e.g. G-XXXXXXX      (optional; omit to skip GA4)
     GA4_API_SECRET       GA4 Measurement Protocol secret
-    BQ_DATASET/BQ_TABLE  BigQuery sink        (optional; omit to log only)
     RETENTION_DAYS       advisory, surfaced on /healthz
 """
 
@@ -45,31 +46,18 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("qh-cc-telemetry")
+log = logging.getLogger("cc-telemetry")
 
 INGEST_TOKEN = os.environ.get("INGEST_TOKEN", "")
 GA4_MEASUREMENT_ID = os.environ.get("GA4_MEASUREMENT_ID", "")
 GA4_API_SECRET = os.environ.get("GA4_API_SECRET", "")
-BQ_DATASET = os.environ.get("BQ_DATASET", "")
-BQ_TABLE = os.environ.get("BQ_TABLE", "")
 RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "90"))
 
 GA4_ENDPOINT = "https://www.google-analytics.com/mp/collect"
 GA4_PARAM_MAX = 100
 MAX_EVENTS_PER_REQUEST = 200
 
-app = FastAPI(title="QH Claude Code Telemetry Collector")
-
-_bq_client = None
-
-
-def bq_client():
-    global _bq_client
-    if _bq_client is None and BQ_DATASET and BQ_TABLE:
-        from google.cloud import bigquery  # imported lazily
-
-        _bq_client = bigquery.Client()
-    return _bq_client
+app = FastAPI(title="Growisto Claude Code Telemetry Collector")
 
 
 class Event(BaseModel):
@@ -179,26 +167,20 @@ async def forward_to_ga4(events: list[Event]) -> int:
 
 
 def persist(events: list[Event]) -> int:
-    client = bq_client()
-    rows = []
+    """
+    Emit each event as a structured log line.
+
+    This is the only persistence the collector does. One line per event, JSON
+    after the `cc_event` prefix, so a log sink can pick them up later without
+    this service needing to know a warehouse exists.
+    """
     for ev in events:
         row = ev.model_dump()
         row["event_time"] = time.strftime(
             "%Y-%m-%d %H:%M:%S", time.gmtime(ev.ts_ms / 1000)
         )
-        rows.append(row)
-    if client is None:
-        # No warehouse configured: emit structured logs so Cloud Logging keeps
-        # them and you can wire a log sink later.
-        for row in rows:
-            log.info("cc_event %s", json.dumps(row, default=str))
-        return len(rows)
-    table = f"{client.project}.{BQ_DATASET}.{BQ_TABLE}"
-    errors = client.insert_rows_json(table, rows)
-    if errors:
-        log.error("bigquery insert errors: %s", errors[:3])
-        raise HTTPException(500, "warehouse write failed")
-    return len(rows)
+        log.info("cc_event %s", json.dumps(row, default=str))
+    return len(events)
 
 
 @app.post("/v1/events")
@@ -222,6 +204,6 @@ def healthz():
     return {
         "ok": True,
         "ga4_configured": bool(GA4_MEASUREMENT_ID and GA4_API_SECRET),
-        "warehouse": f"{BQ_DATASET}.{BQ_TABLE}" if BQ_DATASET and BQ_TABLE else "logs-only",
+        "warehouse": "logs-only",
         "retention_days": RETENTION_DAYS,
     }
