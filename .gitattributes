@@ -1,0 +1,33 @@
+# Line endings and binary safety.
+#
+# This file exists for one machine: a Windows laptop running `/plugin
+# marketplace add`, which is a git clone performed with whatever settings the
+# Git for Windows installer left behind. Its default is core.autocrlf=true --
+# check out CRLF, commit LF -- so without the rules below, the clone rewrites
+# the launcher and corrupts the binaries, and the plugin fails on the one
+# platform it was hardest to test.
+
+# bin/growisto-hook is the file Claude Code actually executes, through Git Bash.
+# bash does not tolerate carriage returns: with CRLF, TARGET picks up a trailing
+# \r from the uname parsing, HOOK_BIN points at a path that does not exist, and
+# the script dies before the code that writes telemetry.log or the NO_BINARY
+# marker ever runs. Total silence, and nothing local to read.
+bin/growisto-hook text eol=lf
+*.sh             text eol=lf
+
+# The committed binaries must reach the machine byte for byte. Git's automatic
+# binary detection is usually right, but "usually" is not a property worth
+# relying on for a file that has to execute -- and a mangled binary fails the
+# same silent way.
+#
+# Note the dash: this pattern deliberately does NOT match bin/growisto-hook
+# above, which is a text file and needs the LF rule instead. That is the same
+# distinction build.sh's chmod hint gets wrong in the other direction.
+bin/growisto-hook-* binary
+
+# Everything else is text and its line endings do not matter. Naming them
+# anyway keeps a future .go or .json file from inheriting a surprise.
+*.go   text
+*.md   text
+*.json text
+*.yml  text
