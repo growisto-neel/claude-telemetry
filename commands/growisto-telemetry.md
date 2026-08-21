@@ -12,27 +12,27 @@ Run the hook's own status command and show the user the output verbatim:
 bash "${CLAUDE_PLUGIN_ROOT}"/bin/growisto-hook --status
 ```
 
-If that produces nothing useful, fall back to invoking the Python directly, trying `python3`, then `python`, then `py -3`:
+If that produces nothing useful, the launcher could not find a binary for this machine. Gather what would name the gap, rather than guessing at it:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}"/hooks/growisto_telemetry_hook.py --status
+uname -s; uname -m; ls "${CLAUDE_PLUGIN_ROOT}"/bin/
 ```
 
-The lines that matter are `enabled`, the resolved email and where it came from, `prompt capture`, whether a GA4 destination is configured, and `pending events`.
+The lines that matter are `enabled`, `platform`, the resolved email and where it came from, `prompt capture`, whether a GA4 destination is configured, and `pending events`.
 
 ## 2. Diagnose
 
 Read the status output and tell the user plainly which of these they are in:
 
-**Working.** `enabled: True`, a `G-` ID present, `pending events: 0`. Say so and stop. Do not change anything.
+**Working.** `enabled: true`, a `G-` ID present, `pending events: 0`. Say so and stop. Do not change anything.
 
-**No Python.** The launcher reported no interpreter, or a `NO_PYTHON` marker exists in the data directory. Telemetry is inactive on this machine and no amount of configuration will change that. Tell them to install Python 3.8+ (`winget install Python.Python.3.14` on Windows, `brew install python` on macOS, already present on Linux), then open a new terminal and start a fresh Claude Code session. Do not attempt to install it for them.
+**No binary for this platform.** The status command printed nothing, or a `NO_BINARY` marker exists in the data directory. Telemetry is inactive on this machine and no amount of configuration will change that, because the repo carries no build for this OS and CPU. Report the `uname -s` and `uname -m` values and what `bin/` actually contains, and tell them to send those three things to Neel — the fix is another GOOS/GOARCH pair in `build.sh`, which has to happen in the repo. Do not try to build one locally for them.
 
 **Configured but not sending.** A `G-` ID is present and `pending events` is above zero. Read the last few lines of `telemetry.log` in the data directory and report what the send actually failed with — a 403 is a wrong API secret, a connection error is a proxy or firewall.
 
 **Not configured.** No GA4 destination. A `NO_DEST` marker in the data directory and a `no GA4 destination` line in `telemetry.log` confirm it; that log line also names the `CLAUDE_PLUGIN_OPTION_*` variables the hook could see, which is what tells you whether the install-time values reached it at all. This is the case step 3 handles.
 
-**Opted out.** `enabled: False`. Say so and leave it alone. Do not re-enable telemetry for someone who turned it off, and do not ask them why.
+**Opted out.** `enabled: false`. Say so and leave it alone. Do not re-enable telemetry for someone who turned it off, and do not ask them why.
 
 ## 3. Repair configuration, only if step 2 landed on "not configured"
 

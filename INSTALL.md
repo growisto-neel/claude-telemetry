@@ -16,15 +16,9 @@ git ls-remote https://github.com/growisto-neel/claude-telemetry >/dev/null && ec
 
 If that prompts for a password or 404s, stop and get access first. A 404 on a private repo means "no access", not "no repo".
 
-**Python 3.8 or newer, on PATH.** The hook is a Python script and Claude Code bundles no interpreter.
+**No runtime to install.** The hook is a static binary, built for each platform and committed to this repo, so there is nothing to install and nothing that can be missing. This was not always true: earlier versions were a Python script, and on a machine without Python 3.8+ on PATH they installed cleanly and then recorded nothing at all. That failure mode is gone.
 
-```bash
-python3 --version || python --version || py -3 --version
-```
-
-Missing: `brew install python` on macOS, `winget install Python.Python.3.14` on Windows, already present on Linux. On Windows, tick "Add python.exe to PATH" in the installer. Afterwards open a new terminal — an existing one keeps the old PATH.
-
-**Git Bash, on Windows only.** Claude Code runs hook commands through Git Bash when it's present and PowerShell when it isn't, and the launcher is a bash script. Git for Windows installs it, and you already have Git for Windows if the repo check above passed.
+**Git Bash, on Windows only.** Claude Code runs hook commands through Git Bash when it's present and PowerShell when it isn't, and the launcher that picks the right binary is a bash script. This is not an extra requirement — Git for Windows ships Git Bash, and you already have Git for Windows if the repo check above passed.
 
 **Network to `google-analytics.com`.** A corporate proxy that intercepts outbound HTTPS will show up as connection errors in `telemetry.log` and a spool that never drains.
 
@@ -92,7 +86,7 @@ If the directory *does* reappear, something is still wired up — go back to A4.
 
 ### B1. Check the prerequisites above
 
-Particularly repo access and Python. Both are quiet failures.
+Particularly repo access — it's the one remaining quiet failure.
 
 ### B2. Add the marketplace and install
 
@@ -117,7 +111,7 @@ You want `enabled: True`, your email, `prompt capture: preview`, a `G-` ID, and 
 
 If it reports **not configured**, the values from B2 didn't reach the hook. The command will offer to write `config.json` itself — say yes, then restart Claude Code again and re-run it. Tell Neel it happened; it means the plugin needs fixing for everyone, not just you.
 
-If it reports **no Python**, that machine can't run the hook at all. Install Python (see prerequisites), open a new terminal, start a fresh session.
+If it reports **no binary for this platform**, the repo carries no build for your OS and CPU. Send Neel the `uname -s` and `uname -m` values from the log line; the fix is one more target in `build.sh`, not anything you can do locally.
 
 ### B5. Confirm data is arriving
 
@@ -142,7 +136,9 @@ wc -l ~/.growisto-claude-telemetry/spool.ndjson
 
 **A growing spool and a connection error** — proxy or firewall between you and `google-analytics.com`.
 
-**No log and no data directory** — the hook never ran. Either the session predates the install (restart), or there's no Python (`/growisto-telemetry` will say so).
+**No log and no data directory** — the hook never ran. The session predates the install; quit Claude Code and reopen it.
+
+**A `NO_BINARY` file in the data directory** — the repo has no build for your OS and CPU. The log line names both, and `/growisto-telemetry` reports it.
 
 **Events accepted but reports empty** — the custom dimensions in [TESTING.md](TESTING.md) step 4 aren't registered, or were registered after the events arrived. Registration is not retroactive; fix the names and send fresh events.
 

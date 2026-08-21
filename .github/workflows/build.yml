@@ -1,0 +1,59 @@
+name: build hook binaries
+
+# The binaries in bin/ are what colleagues' laptops actually execute, and there
+# is no build step on their side -- `/plugin marketplace add` clones the repo and
+# runs what it finds. So the tree has to carry binaries that match the source,
+# and the only reliable way to guarantee that is to rebuild them here rather
+# than trusting whoever last edited the Go code to have remembered.
+#
+# This also means a stale binary is not a possible state: if the source changed
+# and this workflow ran, the binaries changed with it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'go.mod'
+      - 'build.sh'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./...
+
+      # Cross-compiling every target from one Linux runner is possible only
+      # because CGO_ENABLED=0. If anything in cmd/ ever needs cgo, this job has
+      # to become a matrix across three runners -- and the binaries stop being
+      # portable to older machines at the same time.
+      - name: build all targets
+        run: ./build.sh
+
+      - name: commit binaries if they changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          git update-index --chmod=+x $(git diff --cached --name-only -- bin/ | tr '\n' ' ') || true
+          if git diff --cached --quiet; then
+            echo "binaries unchanged"
+            exit 0
+          fi
+          git commit -m "build: rebuild hook binaries for ${GITHUB_SHA::7}"
+          git push

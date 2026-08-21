@@ -1,6 +1,6 @@
 {
   "name": "growisto-claude-telemetry",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Records Claude Code usage (prompt preview, skill, folder, session) and reports it to Growisto analytics. Never records full prompts, responses, or file contents.",
   "author": {
     "name": "Growisto",

@@ -8,13 +8,16 @@ Roughly 20 minutes, most of it clicking through the same GA4 dialog fifteen time
 
 ## Step 1 — Run the self-test
 
-Before any Google configuration, confirm the code is sound on your machine.
+Before any Google configuration, confirm the code is sound on your machine. This needs Go, which only whoever edits the hook needs — colleagues installing the plugin never build anything.
 
 ```bash
-python3 selftest.py
+go test ./...
+./build.sh
 ```
 
-It runs in a temp directory, sends no network traffic, and does not touch your real `~/.claude` or `~/.growisto-claude-telemetry`. A failure here is a bug in the repo, not a setup problem — stop and fix it rather than pushing on.
+The tests run in a temp directory, send no network traffic, and do not touch your real `~/.claude` or `~/.growisto-claude-telemetry`. A failure here is a bug in the repo, not a setup problem — stop and fix it rather than pushing on.
+
+The suite covers the things that fail silently in production: the capture-mode dials resolving to the most private option on a typo, prompt previews never exceeding 100 characters or cutting a multi-byte character in half, redaction running before truncation, `PreToolUse` keeping the four skill tools and dropping everything else, and internal bookkeeping fields never reaching the wire.
 
 ## Step 2 — Create a GA4 property
 
@@ -32,7 +35,7 @@ Admin → Data collection and modification → Data streams → click your strea
 
 You need Editor or Administrator on the property to see this section. If it isn't there, you're a Viewer or Analyst.
 
-This secret is a write credential: anyone holding it can inject arbitrary events into the property. In the default setup a copy lands on every laptop that installs the plugin. That is the argument for running the optional collector once this outgrows a pilot.
+This secret is a write credential: anyone holding it can inject arbitrary events into the property. A copy lands on every laptop that installs the plugin, which is accepted deliberately — it is write-only and scoped to this one property, so the worst case is junk rows in a usage dashboard and the remedy is rotating it here. Treat it accordingly anyway: don't paste it into a group chat, and rotate it when someone leaves.
 
 ## Step 4 — Register the custom dimensions
 
@@ -67,11 +70,11 @@ Enter the measurement ID and API secret when prompted, then restart Claude Code.
 /growisto-telemetry
 ```
 
-You want `enabled: True`, your email with a plausible source, `prompt capture: preview`, your `G-` ID present, and `pending events: 0`.
+You want `enabled: true`, your email with a plausible source, `prompt capture: preview`, your `G-` ID present, and `pending events: 0`.
 
 If it reports **not configured**, the values you entered at install did not reach the hook as environment variables. `/growisto-telemetry` will offer to write `config.json` directly, which fixes it. Tell Neel if this happens — it means the plugin manifest needs adjusting for everyone, not just you.
 
-If it reports **no Python**, that machine cannot run the hook at all. Install Python 3.8+ (`winget install Python.Python.3.14` on Windows, `brew install python` on macOS), open a new terminal, and start a fresh session.
+If it reports **no binary for this platform**, the repo carries no build for that OS and CPU combination. The log line names what `uname` reported; add the corresponding GOOS/GOARCH pair to `build.sh` and push.
 
 ## Step 6 — Confirm events arrive
 
@@ -89,7 +92,7 @@ Standard reports and Explore lag 24–48 hours on a new property, and registered
 
 **`pending events` climbing.** Read `telemetry.log` in the data directory. A `403` is a bad API secret. A connection error is a proxy or firewall between the laptop and `google-analytics.com`.
 
-**Prompts sent but no events at all.** You're probably in a session that started before the plugin was installed. Hooks load at session start; restart Claude Code.
+**Prompts sent but no events at all.** You're probably in a session that started before the plugin was installed. Hooks load at session start; restart Claude Code. Failing that, check for a `NO_BINARY` marker in the data directory.
 
 **Skill events missing, prompt events fine.** Skills are captured through `PreToolUse` filtered to `Skill`, `Task`, `Agent`, and `SlashCommand`. A skill Claude loaded without a tool call won't produce one. If none of the four names match what your Claude Code version actually sends, the filter drops everything silently — `telemetry.log` will show a `dropped PreToolUse for tool_name=...` line naming the real tool.
 

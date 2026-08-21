@@ -2,7 +2,7 @@
 
 A Claude Code plugin that records how the team uses Claude Code and reports it to Google Analytics 4.
 
-Two commands to install, nothing to download, no admin rights. Works on Linux, macOS, and native Windows. The only requirement is Python 3.8+ on the machine.
+Two commands to install, nothing to download, no admin rights, and no runtime to install. Works on Linux, macOS, and native Windows.
 
 ---
 
@@ -33,22 +33,24 @@ One event each time a session starts, a prompt is sent, a skill or subagent runs
 | `cc_session_id`, `model`, `session_source` | session metadata |
 | `os`, `hook_version` | `linux`, `1.4.0` |
 
-**The full text of a prompt is never recorded or transmitted.** Only the first 100 characters, plus the length. There is no field anywhere in the pipeline that could hold more — not in the hook, not in the spool file, not in GA4. Restoring full-prompt capture would mean editing the hook and the collector model, which is the intended amount of friction.
+**The full text of a prompt is never recorded or transmitted.** Only the first 100 characters, plus the length. There is no field anywhere in the pipeline that could hold more — not in the hook, not in the spool file, not in GA4. Restoring full-prompt capture would mean editing the hook itself and shipping new binaries, which is the intended amount of friction.
 
 It does not record Claude's responses, file contents, diffs, terminal output, keystrokes, or anything outside Claude Code.
 
 ## How it works
 
 ```
-Claude Code hook  →  bin/growisto-hook  →  hooks/growisto_telemetry_hook.py  →  spool file  →  GA4
-                     (bash launcher)  (append one line, exit)       (background sender)
+Claude Code hook  →  bin/growisto-hook  →  bin/growisto-hook-<os>-<arch>  →  spool file  →  GA4
+                     (bash launcher)      (static binary: append one line, exit)   (background sender)
 ```
 
 The hook's only job on the critical path is appending one line to a local file, which takes under a millisecond. A detached background process does the network I/O. If the network is down the events stay spooled and go out next time. Every path is wrapped so the process always exits 0 and prints nothing, because a `UserPromptSubmit` hook that exits non-zero can block the prompt, and anything it prints on stdout gets injected into Claude's context.
 
-`bin/growisto-hook` exists because hook commands are shell commands and Claude Code bundles no interpreter. It finds a Python 3.8+ interpreter — trying `python3`, `python`, `py -3`, then the directories the Windows installer actually uses — and execs the hook. One bash script covers all three platforms: Claude Code runs hook commands through bash on Linux and macOS and Git Bash on Windows, and since installing a plugin means cloning a git repo, anyone who can install this has Git Bash.
+`bin/growisto-hook` exists because hook commands are shell commands, not executables with arguments. It reads `uname` to derive an OS and CPU pair, execs the matching `bin/growisto-hook-<os>-<arch>` binary, and does nothing else of consequence. Six binaries are committed to the repo — Linux, macOS, and Windows, each for amd64 and arm64 — because `/plugin marketplace add` clones the repo and runs what it finds, with no build step it could trigger. One bash script covers all three platforms: Claude Code runs hook commands through bash on Linux and macOS and Git Bash on Windows, and since installing a plugin means cloning a git repo, anyone who can install this has Git Bash.
 
-If no interpreter is found, the launcher writes one line to the log, drops a marker so it never complains again, and exits 0. Nobody's session breaks — but telemetry is silently inactive on that machine. See Known limitations.
+The binaries are Go, built with `CGO_ENABLED=0`, so they link nothing and need no runtime installed. `GROWISTO_TELEMETRY_BINARY` overrides the choice if you need to point at a local build.
+
+If no binary matches the machine, the launcher writes one line to the log naming both the derived target and the raw `uname` output, drops a `NO_BINARY` marker so it never complains again, and exits 0. Nobody's session breaks — but telemetry is silently inactive on that machine until another target is added to `build.sh`. See Known limitations.
 
 ## Privacy dials
 
@@ -89,38 +91,52 @@ Everything queued is plain text on the employee's own machine, so anyone can rea
 .claude-plugin/plugin.json       manifest, including the install-time prompts
 .claude-plugin/marketplace.json  marketplace definition
 hooks/hooks.json                 the four hook registrations
-hooks/growisto_telemetry_hook.py       all the logic; stdlib only
-bin/growisto-hook                      cross-platform launcher
-commands/growisto-telemetry.md         the /growisto-telemetry status and repair command
-collector/                       optional service, see below
-selftest.py                      the test suite
+cmd/growisto-hook/               all the logic; Go standard library only
+  main.go                        config, dials, the four modes, exit-0 guarantee
+  event.go                       identity, redaction, event shape, GA4 projection
+  spool.go                       spool file, locking, background sender
+  platform_unix.go               build-tagged: process liveness, detach, chmod
+  platform_windows.go            build-tagged: OpenProcess, creation flags, icacls
+  hook_test.go                   the test suite
+bin/growisto-hook                cross-platform launcher
+bin/growisto-hook-<os>-<arch>    the committed binaries, six of them
+build.sh                         builds all six
+go.mod                           module definition; no dependencies
+.github/workflows/build.yml      rebuilds and commits bin/ on every push
+commands/growisto-telemetry.md   the /growisto-telemetry status and repair command
 ```
 
 ## GA4 setup
 
 Only needed once, by whoever owns the property. Full walkthrough in [TESTING.md](TESTING.md) — create a Web data stream, create a Measurement Protocol API secret, and **register the custom dimensions**. That last step is the one that silently ruins things: GA4 stores custom parameters immediately but will not show them in any report until each is registered by name, and registration is not retroactive.
 
-## Optional collector
+## Why there is no server
 
-`collector/` is a small FastAPI service that receives events and forwards them to GA4. It is not part of the default deployment and nothing needs it.
+Every laptop posts straight to GA4. There is no service in the middle, and an earlier FastAPI collector was deleted rather than maintained.
 
-The one reason to run it: the GA4 API secret is a write credential, and in direct mode a copy sits on every laptop. The collector keeps it in one place instead. It logs each event as a structured line; there is no warehouse writer, and the BigQuery sink that used to be here was removed because nobody was running it.
+The argument for a proxy was that the GA4 API secret is a write credential and direct mode puts a copy on every machine. That is true, and it is a smaller problem than it sounds: the secret is write-only and scoped to one analytics property, so the worst an attacker does with it is inject junk events into a usage dashboard, and the fix is rotating one value. Weighed against running, deploying, and securing a service in a second language, it does not justify itself.
+
+The other reasons a proxy would earn its place are worth knowing, because they are what would change the answer. Central control over the payload — hashing `user_email` before it leaves the machine, or moving off GA4 entirely — is currently a code change plus a push to sixty laptops rather than a config change in one place. And GA4's own event-level retention caps at fourteen months, so anything longer needs a warehouse behind a collector. If either becomes a real requirement, the pipeline should be designed for it rather than reassembled from the deleted service.
 
 ## Testing
 
 ```bash
-python3 selftest.py        # or ./selftest.sh
+go vet ./...
+go test ./...
+./build.sh
 ```
 
-Runs in a temp directory, sends no network traffic, and does not touch your real `~/.claude` or `~/.growisto-claude-telemetry`. Twelve areas: syntax, event capture, noise filtering, secret redaction, capture modes, opt-out, resilience and latency, GA4 payload shape, crash recovery, duplicate suppression, platform behaviour, and paths containing spaces.
+Only whoever edits the hook needs Go. Colleagues installing the plugin build nothing.
 
-The platform section is the one worth knowing about. On POSIX the standard way to ask "is process N alive?" is `os.kill(pid, 0)`; on Windows that same call *terminates* the process, and Windows recycles PIDs. A naive port would have had telemetry killing unrelated programs. The suite starts a real child, probes it, and asserts it survived.
+The tests run in a temp directory, send no network traffic, and do not touch your real `~/.claude` or `~/.growisto-claude-telemetry` — every one of them repoints the data directory at `t.TempDir()` first. They cover the things that fail silently in production: the capture-mode dials resolving to the most private option on a typo, prompt previews never exceeding 100 characters or cutting a multi-byte character in half, redaction running before truncation, `PreToolUse` keeping the four skill tools and dropping everything else, internal bookkeeping fields never reaching the wire, and one corrupt spool line costing one event rather than the whole file.
+
+The platform split is the part worth knowing about. On POSIX the standard way to ask "is process N alive?" is `kill(pid, 0)`; on Windows that same call *terminates* the process, and Windows recycles PIDs. `platform_windows.go` uses `OpenProcess` plus `GetExitCodeProcess` instead, and treats access-denied as "exists, not ours". A naive port would have had telemetry killing unrelated programs.
 
 ## Known limitations
 
-**Python is a hard requirement and is not guaranteed.** On a machine without it, telemetry is silently inactive. For a telemetry system this is the worst kind of gap, because the dashboard looks healthy while systematically missing whichever population is least likely to have Python installed. The permanent fix is porting the hook to a compiled binary shipped inside the plugin.
+**The binaries have never been executed.** Not on Windows, not anywhere. The Go code was written against the documented behaviour of `OpenProcess`, `GetExitCodeProcess`, `icacls`, and Git Bash and reviewed carefully, but reading code is not running it. Run `go test ./...` and a real install on each platform before trusting any of it.
 
-**The Windows path has never been executed.** It was written against the documented behaviour of `os.kill`, `os.open`, `icacls`, and Git Bash, and reviewed carefully, but reading code is not running it. Run `selftest.py` on a Windows machine before trusting it.
+**A missing target is still a silent gap.** The Python requirement that used to sit here is gone — the hook is a static binary now, so there is no runtime to be absent. What replaced it is narrower but the same shape: a machine whose OS and CPU pair has no committed build records nothing, and the dashboard looks healthy while missing it. The fix is one more GOOS/GOARCH pair in `build.sh`, and `/growisto-telemetry` reports the values needed to add it.
 
 **`user_email` in GA4 is a Google terms violation.** GA4 is not covered by a BAA and Google's terms prohibit sending PII. The `user_email_sha256` field exists as the compliant alternative — keep a lookup table on your side and let dashboards operate on the hash. Worth doing if GA4 becomes load-bearing.
 
