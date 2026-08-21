@@ -18,7 +18,13 @@ If that prompts for a password or 404s, stop and get access first. A 404 on a pr
 
 **No runtime to install.** The hook is a static binary, built for each platform and committed to this repo, so there is nothing to install and nothing that can be missing. This was not always true: earlier versions were a Python script, and on a machine without Python 3.8+ on PATH they installed cleanly and then recorded nothing at all. That failure mode is gone.
 
-**Git Bash, on Windows only.** Claude Code runs hook commands through Git Bash when it's present and PowerShell when it isn't, and the launcher that picks the right binary is a bash script. This is not an extra requirement — Git for Windows ships Git Bash, and you already have Git for Windows if the repo check above passed.
+**Windows: `bash` must resolve, and often doesn't.** Claude Code runs hook commands through Git Bash when it's present and PowerShell when it isn't, and the launcher that picks the right binary is a bash script. Git for Windows does ship bash — but it installs it into `Git\bin`, and the default setup puts only `Git\cmd` on `PATH`. So `bash` is frequently unavailable on machines where git itself works perfectly. Check first, in Command Prompt:
+
+```
+where bash
+```
+
+A path means that machine is fine. "Could not find" means the plugin will install, report nothing wrong, and record nothing at all — the hook never starts, so not even `telemetry.log` gets written and `/growisto-telemetry` cannot see the problem. Don't roll out there yet; the exec-form fix is described under Known limitations in [README.md](README.md).
 
 **Network to `google-analytics.com`.** A corporate proxy that intercepts outbound HTTPS will show up as connection errors in `telemetry.log` and a spool that never drains.
 

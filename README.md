@@ -46,7 +46,9 @@ Claude Code hook  →  bin/growisto-hook  →  bin/growisto-hook-<os>-<arch>  �
 
 The hook's only job on the critical path is appending one line to a local file, which takes under a millisecond. A detached background process does the network I/O. If the network is down the events stay spooled and go out next time. Every path is wrapped so the process always exits 0 and prints nothing, because a `UserPromptSubmit` hook that exits non-zero can block the prompt, and anything it prints on stdout gets injected into Claude's context.
 
-`bin/growisto-hook` exists because hook commands are shell commands, not executables with arguments. It reads `uname` to derive an OS and CPU pair, execs the matching `bin/growisto-hook-<os>-<arch>` binary, and does nothing else of consequence. Six binaries are committed to the repo — Linux, macOS, and Windows, each for amd64 and arm64 — because `/plugin marketplace add` clones the repo and runs what it finds, with no build step it could trigger. One bash script covers all three platforms: Claude Code runs hook commands through bash on Linux and macOS and Git Bash on Windows, and since installing a plugin means cloning a git repo, anyone who can install this has Git Bash.
+`bin/growisto-hook` exists because a hook command is a string handed to a shell, not a path with arguments. It reads `uname` to derive an OS and CPU pair, execs the matching `bin/growisto-hook-<os>-<arch>` binary, and does nothing else of consequence. Four binaries are committed to the repo — linux-amd64, darwin-amd64, darwin-arm64, windows-amd64 — because `/plugin marketplace add` clones the repo and runs what it finds, with no build step it could trigger.
+
+The launcher being a bash script is a known weak point on Windows, not a settled decision. Claude Code runs a hook command through `sh -c` on Linux and macOS, and on Windows through Git Bash — falling back to PowerShell when Git Bash is not installed. Linux and macOS always have a shell that can run this. Windows does not: Git for Windows ships bash but puts it in `Git\bin`, which the default install leaves off `PATH`, so `bash` frequently does not resolve even on machines that have it. See Known limitations.
 
 The binaries are Go, built with `CGO_ENABLED=0`, so they link nothing and need no runtime installed. `GROWISTO_TELEMETRY_BINARY` overrides the choice if you need to point at a local build.
 
@@ -99,8 +101,8 @@ cmd/growisto-hook/               all the logic; Go standard library only
   platform_windows.go            build-tagged: OpenProcess, creation flags, icacls
   hook_test.go                   the test suite
 bin/growisto-hook                cross-platform launcher
-bin/growisto-hook-<os>-<arch>    the committed binaries, six of them
-build.sh                         builds all six
+bin/growisto-hook-<os>-<arch>    the committed binaries, four of them
+build.sh                         builds all four
 go.mod                           module definition; no dependencies
 .github/workflows/build.yml      rebuilds and commits bin/ on every push
 commands/growisto-telemetry.md   the /growisto-telemetry status and repair command
@@ -136,7 +138,11 @@ The platform split is the part worth knowing about. On POSIX the standard way to
 
 **The binaries have never been executed.** Not on Windows, not anywhere. The Go code was written against the documented behaviour of `OpenProcess`, `GetExitCodeProcess`, `icacls`, and Git Bash and reviewed carefully, but reading code is not running it. Run `go test ./...` and a real install on each platform before trusting any of it.
 
-**A missing target is still a silent gap.** The Python requirement that used to sit here is gone — the hook is a static binary now, so there is no runtime to be absent. What replaced it is narrower but the same shape: a machine whose OS and CPU pair has no committed build records nothing, and the dashboard looks healthy while missing it. The fix is one more GOOS/GOARCH pair in `build.sh`, and `/growisto-telemetry` reports the values needed to add it.
+**Windows records nothing unless `bash` resolves.** This is the live one. The hook command is `bash "${CLAUDE_PLUGIN_ROOT}"/bin/growisto-hook`, and when Git Bash is not installed Claude Code hands that string to PowerShell, where `bash` is not a command. The hook fails to spawn, and because it never starts, none of the diagnostics inside it run — no log line, no `NO_BINARY` marker, no `pending events`. `/growisto-telemetry` cannot report it either. It is the worst failure mode in the system: total silence with no local evidence, on whichever machines happen to lack a tool nobody chose to lack.
+
+The fix is to stop going through a shell at all. A hook can be declared in exec form, with an `args` array instead of a `command` string, which Claude Code execs directly — no `sh`, no Git Bash, no PowerShell, no interpreter on any platform. That also makes the bash launcher deletable rather than portable. The open question is that `args` names one path while there are four binaries, so either extensionless exec resolves `growisto-hook` to `growisto-hook.exe` on Windows (one entry covers everything) or the hook is registered once per filename with duplicate suppression in the binary. Resolve that before rolling out to any Windows machine.
+
+**A missing target is a silent gap by design.** The Python requirement that used to sit here is gone — the hook is a static binary, so there is no runtime to be absent. What replaced it is narrower: `build.sh` ships four targets and deliberately omits linux-arm64 and windows-arm64, so a Raspberry Pi or ARM server would record nothing. Unlike the Windows case above this one announces itself, because the launcher does run — it writes a `NO_BINARY` marker naming the target it wanted, and `/growisto-telemetry` reports it. The fix is one more line in `build.sh`.
 
 **`user_email` in GA4 is a Google terms violation.** GA4 is not covered by a BAA and Google's terms prohibit sending PII. The `user_email_sha256` field exists as the compliant alternative — keep a lookup table on your side and let dashboards operate on the hash. Worth doing if GA4 becomes load-bearing.
 

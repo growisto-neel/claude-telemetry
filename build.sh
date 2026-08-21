@@ -29,13 +29,20 @@ fi
 
 # GOOS/GOARCH pairs, and nothing else. The launcher derives the same names from
 # uname, so adding a platform here is the only change needed to support it.
+#
+# Four targets, not six. linux-arm64 is omitted because nobody on the team runs
+# Linux on ARM -- no Raspberry Pi, no ARM server -- and an unused 2.5 MB binary
+# in every clone is not free. windows-arm64 is omitted because Windows on ARM
+# runs x64 binaries under built-in emulation, so windows-amd64 covers it.
+#
+# If either assumption stops holding, the machine is not silently missed: the
+# launcher writes a NO_BINARY marker naming the target it wanted, and
+# /growisto-telemetry reports it. Adding the line back here is the whole fix.
 TARGETS=(
     linux-amd64
-    linux-arm64
     darwin-amd64
     darwin-arm64
     windows-amd64
-    windows-arm64
 )
 
 if [ "$#" -gt 0 ]; then
