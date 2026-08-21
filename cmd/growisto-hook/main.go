@@ -40,7 +40,13 @@ import (
 // rewrite so that any shift in the data — most visibly the `os` dimension,
 // which now carries Go's "windows" where the Python hook sent "win32" — is
 // attributable to a known change rather than looking like a data fault.
-const hookVersion = "2.0.0"
+//
+// 2.1.0 moved install-time option handling out of the bash launcher and into
+// this binary, and added duplicate suppression. Both change what arrives in
+// GA4: machines that were silently unconfigured may start reporting, and any
+// machine with hooks registered twice will stop double-counting. Seeing event
+// volume move when this version appears is the change working, not a fault.
+const hookVersion = "2.1.0"
 
 const (
 	ga4Endpoint      = "https://www.google-analytics.com/mp/collect"
@@ -125,18 +131,47 @@ func loadConfig() Config {
 		_ = json.Unmarshal(raw, &cfg)
 	}
 
-	env := func(dst *string, name string) {
-		if v := os.Getenv(name); v != "" {
+	// Three sources, in descending precedence:
+	//
+	//   1. An explicit GROWISTO_TELEMETRY_* variable. Deliberate, so it wins.
+	//   2. An install-time plugin option, matched on any spelling. See options.go.
+	//   3. A legacy exact name, for anyone who exported these by hand before the
+	//      plugin existed.
+	//
+	// Source 2 used to be handled by the bash launcher, which exported the
+	// GROWISTO_TELEMETRY_* names before running this binary. Doing it here
+	// instead means one implementation rather than one per shell, and it is
+	// testable.
+	opts := pluginOptions()
+	set := func(dst *string, envName, optionKey string, legacy ...string) {
+		if v := os.Getenv(envName); v != "" {
 			*dst = v
+			return
+		}
+		if v := opts[canonicalOptionName(optionKey)]; v != "" {
+			*dst = v
+			return
+		}
+		for _, name := range legacy {
+			if v := os.Getenv(name); v != "" {
+				*dst = v
+				return
+			}
 		}
 	}
-	env(&cfg.GA4MeasurementID, "GROWISTO_TELEMETRY_GA4_MEASUREMENT_ID")
-	env(&cfg.GA4APISecret, "GROWISTO_TELEMETRY_GA4_API_SECRET")
-	env(&cfg.UserEmail, "GROWISTO_TELEMETRY_USER_EMAIL")
-	env(&cfg.Team, "GROWISTO_TELEMETRY_TEAM")
-	env(&cfg.PromptCapture, "GROWISTO_TELEMETRY_PROMPT_CAPTURE")
-	env(&cfg.PathCapture, "GROWISTO_TELEMETRY_PATH_CAPTURE")
-	env(&cfg.Debug, "GROWISTO_TELEMETRY_DEBUG")
+
+	// The legacy candidates are all SCREAMING_SNAKE and specific to this plugin,
+	// which is not cosmetic. os.Getenv is case-insensitive on Windows, so
+	// accepting a bare `team` or `userEmail` would silently adopt an unrelated
+	// TEAM=... exported by some other tool — on Windows only, and discovered
+	// months later from a dashboard nobody could explain.
+	set(&cfg.GA4MeasurementID, "GROWISTO_TELEMETRY_GA4_MEASUREMENT_ID", "ga4MeasurementId", "GA4_MEASUREMENT_ID")
+	set(&cfg.GA4APISecret, "GROWISTO_TELEMETRY_GA4_API_SECRET", "ga4ApiSecret", "GA4_API_SECRET")
+	set(&cfg.UserEmail, "GROWISTO_TELEMETRY_USER_EMAIL", "userEmail")
+	set(&cfg.Team, "GROWISTO_TELEMETRY_TEAM", "team")
+	set(&cfg.PromptCapture, "GROWISTO_TELEMETRY_PROMPT_CAPTURE", "promptCapture")
+	set(&cfg.PathCapture, "GROWISTO_TELEMETRY_PATH_CAPTURE", "pathCapture")
+	set(&cfg.Debug, "GROWISTO_TELEMETRY_DEBUG", "debug")
 
 	// Both of these are privacy dials, and neither source that sets them can
 	// validate them: plugin.json's userConfig has no enum support, and an
@@ -257,8 +292,12 @@ func main() {
 
 	switch arg {
 	case "--secure":
-		// Used by the installers so the ACL/chmod logic lives in one place
-		// rather than being reimplemented in bash and in PowerShell.
+		// The install scripts this was written for are gone. The caller now is
+		// /growisto-telemetry, when it writes config.json. Keeping it is still
+		// worth it: the alternative is that command choosing between chmod and
+		// icacls by hand, and config.json holds a GA4 write credential, so a
+		// permissions step that quietly does nothing is the failure that
+		// matters here.
 		if len(os.Args) < 3 {
 			fmt.Fprintln(os.Stderr, "usage: growisto-hook --secure <path>")
 			return
@@ -298,10 +337,17 @@ func hookMode() {
 		return
 	}
 	cfg := loadConfig()
+	warnIfNoDestination(cfg)
 	// allowSubprocess=false: nothing on the synchronous hook path may shell
 	// out. If identity is not in config or cache, the flusher resolves it.
 	event := buildEvent(payload, cfg, false)
 	if event == nil {
+		return
+	}
+	// Before the spool, not after: the point is that a second hook entry firing
+	// for the same occurrence never becomes a second row in GA4.
+	if alreadySeen(event) {
+		logf("suppressed duplicate %s (session %s)", event.EventName, event.SessionID)
 		return
 	}
 	if err := spoolAppend(event); err != nil {
@@ -356,6 +402,11 @@ func statusMode() {
 	fmt.Printf("  path capture:    %s\n", cfg.PathCapture)
 	fmt.Printf("  ga4 property:    %s\n", orNone(cfg.GA4MeasurementID))
 	fmt.Printf("  ga4 secret:      %s\n", presence(cfg.GA4APISecret))
+	// Which install-time options this process can see. Without this line, the
+	// difference between "Claude Code exported nothing" and "it exported them
+	// under names this binary does not recognise" is only discoverable by
+	// knowing to read a log file.
+	fmt.Printf("  plugin options:  %s\n", optionSummary())
 	fmt.Printf("  pending events:  %d\n", pending)
 	fmt.Printf("  log:             %s\n", logPath)
 	fmt.Println("\nTo opt out at any time:  export GROWISTO_TELEMETRY=0")

@@ -2,12 +2,23 @@ name: build hook binaries
 
 # The binaries in bin/ are what colleagues' laptops actually execute, and there
 # is no build step on their side -- `/plugin marketplace add` clones the repo and
-# runs what it finds. So the tree has to carry binaries that match the source,
-# and the only reliable way to guarantee that is to rebuild them here rather
-# than trusting whoever last edited the Go code to have remembered.
+# runs what it finds. So the tree has to carry binaries that match the source.
 #
-# This also means a stale binary is not a possible state: if the source changed
-# and this workflow ran, the binaries changed with it.
+# This job used to guarantee that by rebuilding them and committing the result
+# back to main. That was a mistake, and an expensive one. Every push of source
+# produced a bot commit on top of it, so the next human push was always behind
+# and always needed a rebase -- and because bin/ is binary, every one of those
+# rebases was a conflict git cannot merge. Resolving binary conflicts by hand is
+# where changes get discarded without anyone noticing, and it happened.
+#
+# So bin/ has exactly one owner now: whoever changed cmd/ runs ./build.sh and
+# commits the binaries in the same commit as the source. This job's remaining
+# job is to notice when they forget -- it rebuilds and fails if the result
+# differs from what was committed, without writing anything to the repo.
+#
+# The trade is explicit: a stale binary is now a possible state for as long as
+# it takes CI to fail. That is strictly better than a workflow that guarantees
+# freshness by making every push a binary merge conflict.
 
 on:
   push:
@@ -19,8 +30,10 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
+# Read-only. This job no longer writes to the repository, and removing the
+# permission is what stops it quietly starting again.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -45,15 +58,40 @@ jobs:
       - name: build all targets
         run: ./build.sh
 
-      - name: commit binaries if they changed
+      # Fail loudly rather than fixing it silently. If this fails, the committed
+      # binaries are older than the committed source, and colleagues installing
+      # the plugin would run the old code with nothing to indicate it.
+      #
+      # This compares commit dates rather than rebuilding and diffing the bytes.
+      # Byte comparison would be the stronger check and it is not usable here:
+      # build.sh already passes -trimpath with CGO_ENABLED=0, so builds are
+      # reproducible, but only between identical Go toolchains. Any patch-version
+      # difference between this runner and the machine that ran build.sh produces
+      # different bytes from identical source, and a check that fails for reasons
+      # nobody can act on gets ignored, then deleted.
+      - name: verify bin/ is not older than the source
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bin/
-          git update-index --chmod=+x $(git diff --cached --name-only -- bin/ | tr '\n' ' ') || true
-          if git diff --cached --quiet; then
-            echo "binaries unchanged"
-            exit 0
+          src=$(git log -1 --format=%ct -- cmd go.mod build.sh)
+          bins=$(git log -1 --format=%ct -- bin)
+          if [ -z "$bins" ] || [ "$src" -gt "$bins" ]; then
+            echo "::error::cmd/ was changed more recently than bin/."
+            echo "Run ./build.sh and commit bin/ in the same commit as the source."
+            echo "source last touched: $(git log -1 --format=%cI -- cmd go.mod build.sh)"
+            echo "bin/   last touched: $(git log -1 --format=%cI -- bin)"
+            exit 1
           fi
-          git commit -m "build: rebuild hook binaries for ${GITHUB_SHA::7}"
-          git push
+          echo "bin/ is at least as new as the source"
+
+      # Claude Code runs bin/growisto-hook through bash, so this file needs the
+      # executable bit in git. Losing it means the hook never starts, and there
+      # is no log line and no marker to notice -- the launcher is what writes
+      # those, and it never ran.
+      - name: verify the launcher is executable in git
+        run: |
+          mode=$(git ls-files -s bin/growisto-hook | cut -d' ' -f1)
+          if [ "$mode" != "100755" ]; then
+            echo "::error::bin/growisto-hook is mode $mode, expected 100755."
+            echo "Fix with: git update-index --chmod=+x bin/growisto-hook"
+            exit 1
+          fi
+          echo "launcher mode ok"

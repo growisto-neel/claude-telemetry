@@ -18,7 +18,7 @@ If that produces nothing useful, the launcher could not find a binary for this m
 uname -s; uname -m; ls "${CLAUDE_PLUGIN_ROOT}"/bin/
 ```
 
-The lines that matter are `enabled`, `platform`, the resolved email and where it came from, `prompt capture`, whether a GA4 destination is configured, and `pending events`.
+The lines that matter are `enabled`, `platform`, `hook version`, the resolved email and where it came from, `prompt capture`, whether a GA4 destination is configured, `plugin options`, and `pending events`.
 
 ## 2. Diagnose
 
@@ -30,7 +30,9 @@ Read the status output and tell the user plainly which of these they are in:
 
 **Configured but not sending.** A `G-` ID is present and `pending events` is above zero. Read the last few lines of `telemetry.log` in the data directory and report what the send actually failed with — a 403 is a wrong API secret, a connection error is a proxy or firewall.
 
-**Not configured.** No GA4 destination. A `NO_DEST` marker in the data directory and a `no GA4 destination` line in `telemetry.log` confirm it; that log line also names the `CLAUDE_PLUGIN_OPTION_*` variables the hook could see, which is what tells you whether the install-time values reached it at all. This is the case step 3 handles.
+**Nothing at all.** No status output, no data directory, no log, and `bin/` contains the binaries it should. The hook process is never being started, which means `bash` is not resolving — the launcher is a shell script, and none of the diagnostics exist until it runs. On Windows this is Git Bash missing or shadowed by `C:\Windows\System32\bash.exe`, the WSL launcher; check `where bash` and point them at Git for Windows. Do not attempt to repair the configuration, and do not write `config.json`: there is nothing wrong with it, and doing so would hide the real problem behind a file that looks correct.
+
+**Not configured.** No GA4 destination — either half missing counts, since a measurement ID without a secret fails every send while looking healthy, because the Measurement Protocol returns 2xx for a request it discards. The `plugin options` line names the install-time options the hook could actually see: `(none visible)` means Claude Code exported nothing, while a list that does not include `ga4measurementid` means they arrived under names the hook does not recognise, which is a bug to report rather than something to work around. A `NO_DEST` marker in the data directory and a `no GA4 destination` line in `telemetry.log` say the same thing. This is the case step 3 handles.
 
 **Opted out.** `enabled: false`. Say so and leave it alone. Do not re-enable telemetry for someone who turned it off, and do not ask them why.
 
@@ -51,7 +53,13 @@ Then write `config.json` into the telemetry data directory — `$GROWISTO_TELEME
 }
 ```
 
-Create the directory first if it does not exist. On Linux and macOS, `chmod 600` the file afterwards. On Windows, run `icacls` to grant the current user alone access. That file holds a credential that can write arbitrary events into the analytics property, so it must not be group- or world-readable.
+Create the directory first if it does not exist. Then lock the file down by asking the hook to do it, rather than choosing between `chmod` and `icacls` yourself:
+
+```
+bash "${CLAUDE_PLUGIN_ROOT}"/bin/growisto-hook --secure ~/.growisto-claude-telemetry/config.json
+```
+
+It prints what it did. That file holds a credential that can write arbitrary events into the analytics property, so it must not be group- or world-readable — if the command reports it could not restrict the file, say so plainly rather than moving on.
 
 Never echo the API secret back into the conversation after writing it, and never write it anywhere other than that one file.
 

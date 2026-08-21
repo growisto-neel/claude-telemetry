@@ -20,9 +20,9 @@ import (
 //     entries directly into ~/.claude/settings.json, and those survive a plugin
 //     uninstall because the plugin never put them there. The same happens if the
 //     plugin is installed at both user and project level.
-//   - More than one hooks.json entry for the same event, which is what
-//     per-platform registration would require if naming one executable path
-//     ever stopped resolving on Windows.
+//   - More than one hooks.json entry for the same event. Nothing here does that
+//     today, but it is the shape any future per-platform registration would
+//     take, and it would be indistinguishable in the data from genuine use.
 //
 // Double-counted events are worse than missing ones, because they look
 // plausible. An adoption dashboard would simply read high, with nothing

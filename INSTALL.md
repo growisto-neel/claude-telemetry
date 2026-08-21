@@ -8,23 +8,29 @@ Two procedures. [Part A](#part-a--clean-teardown-and-negative-test) is for whoev
 
 Check these before touching Claude Code. Every one of them fails silently if it's missing — the plugin installs fine and simply never sends anything.
 
-**Access to the repo.** `growisto-neel/claude-telemetry` is private. `/plugin marketplace add` clones it over your existing git credentials, so you need to already be able to reach it:
+**git, and access to the repo.** `/plugin marketplace add` clones the repository, so git has to be installed and has to be able to reach a private repo. One command checks both:
 
 ```bash
 git ls-remote https://github.com/growisto-neel/claude-telemetry >/dev/null && echo ok
 ```
 
-If that prompts for a password or 404s, stop and get access first. A 404 on a private repo means "no access", not "no repo".
+`ok` means you're fine. "command not found" means install git first. A password prompt or a 404 means you don't have access — on a private repo a 404 means "no access", not "no repo" — so stop and get it before going further.
+
+On Windows, install [Git for Windows](https://git-scm.com/download/win) with the default options. That covers this prerequisite and the next one at the same time.
 
 **No runtime to install.** The hook is a static binary, built for each platform and committed to this repo, so there is nothing to install and nothing that can be missing. This was not always true: earlier versions were a Python script, and on a machine without Python 3.8+ on PATH they installed cleanly and then recorded nothing at all. That failure mode is gone.
 
-**Windows: `bash` must resolve, and often doesn't.** Claude Code runs hook commands through Git Bash when it's present and PowerShell when it isn't, and the launcher that picks the right binary is a bash script. Git for Windows does ship bash — but it installs it into `Git\bin`, and the default setup puts only `Git\cmd` on `PATH`. So `bash` is frequently unavailable on machines where git itself works perfectly. Check first, in Command Prompt:
+**bash, which on Windows means Git Bash.** The launcher that picks the right binary for your machine is a shell script, and Claude Code runs hook commands through Git Bash on Windows. This is not an extra requirement on top of the one above: Git for Windows installs Git Bash as part of a default install, so anyone who can install the plugin already has it.
+
+Worth knowing what the failure looks like anyway, because it is completely silent. If `bash` cannot be resolved, the hook process never starts — so nothing is written, not even `telemetry.log`, and `/growisto-telemetry` has nothing to report. It is the one failure the plugin cannot diagnose about itself, because the code that writes the diagnostics is the code that didn't run.
+
+If you installed git some other way — a bare `git.exe`, or a package that skips Git Bash — check in Command Prompt:
 
 ```
 where bash
 ```
 
-A path means that machine is fine. "Could not find" means the plugin will install, report nothing wrong, and record nothing at all — the hook never starts, so not even `telemetry.log` gets written and `/growisto-telemetry` cannot see the problem. Don't roll out there yet; the exec-form fix is described under Known limitations in [README.md](README.md).
+If that prints only `C:\Windows\System32\bash.exe`, that is the WSL launcher, not a shell, and it will fail on a machine without WSL. Install Git for Windows with the default options.
 
 **Network to `google-analytics.com`.** A corporate proxy that intercepts outbound HTTPS will show up as connection errors in `telemetry.log` and a spool that never drains.
 
@@ -67,6 +73,8 @@ grep -rn -e telemetry -e qh- -e growisto- \
 ```
 
 Any hit under a `"hooks"` key is a leftover — edit the file and delete that entry. Expect no output on a clean machine.
+
+The hook now suppresses an identical event seen twice within five seconds, so a leftover entry no longer doubles anybody's numbers. Delete it anyway: the suppression is a safety net, not a reason to leave two things wired to the same event.
 
 ```bash
 ls ~/.claude/plugins/ 2>/dev/null
@@ -113,9 +121,13 @@ Quit and reopen. Hooks only load at session start, so nothing is recorded until 
 /growisto-telemetry
 ```
 
-You want `enabled: True`, your email, `prompt capture: preview`, a `G-` ID, and `pending events: 0`.
+You want `hook version: 2.1.0`, `enabled: true`, your email, `prompt capture: preview`, a `G-` ID, `ga4 secret: set`, and `pending events: 0`.
 
-If it reports **not configured**, the values from B2 didn't reach the hook. The command will offer to write `config.json` itself — say yes, then restart Claude Code again and re-run it. Tell Neel it happened; it means the plugin needs fixing for everyone, not just you.
+Check `ga4 secret` specifically. A measurement ID with no secret is the worst state to be in, because the Measurement Protocol answers `2xx` to a request it then discards — everything looks like it's working and no data ever appears.
+
+If it reports **not configured**, the values from B2 didn't reach the hook. The `plugin options` line says which ones the hook could actually see, and that is the useful detail: `(none visible)` means Claude Code exported nothing, while a list that doesn't include `ga4measurementid` means they arrived under names the hook doesn't recognise. The command will offer to write `config.json` itself — say yes, then restart Claude Code again and re-run it. Either way tell Neel, because the second case is a bug affecting everyone rather than something about your machine.
+
+If it prints **nothing at all** and there's no data directory, the hook process never started. That's the `bash` prerequisite above, not anything you did. Send Neel the output of `where bash`.
 
 If it reports **no binary for this platform**, the repo carries no build for your OS and CPU. Send Neel the `uname -s` and `uname -m` values from the log line; the fix is one more target in `build.sh`, not anything you can do locally.
 
@@ -142,7 +154,7 @@ wc -l ~/.growisto-claude-telemetry/spool.ndjson
 
 **A growing spool and a connection error** — proxy or firewall between you and `google-analytics.com`.
 
-**No log and no data directory** — the hook never ran. The session predates the install; quit Claude Code and reopen it.
+**No log and no data directory** — the hook never ran. Usually the session predates the install, so quit Claude Code and reopen it. If it persists after a restart, `bash` isn't resolving and the hook process is never being started at all; on Windows check `where bash` and see the prerequisites.
 
 **A `NO_BINARY` file in the data directory** — the repo has no build for your OS and CPU. The log line names both, and `/growisto-telemetry` reports it.
 

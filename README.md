@@ -21,7 +21,7 @@ To remove it: `/plugin uninstall growisto-claude-telemetry`.
 
 ## What it records
 
-One event each time a session starts, a prompt is sent, a skill or subagent runs, and a session ends.
+One event each time a session starts, a prompt is sent, a skill or subagent runs, and a session ends. An identical event seen twice within five seconds is recorded once, so two things wired to the same hook cannot quietly double somebody's numbers.
 
 | Field | Example |
 |---|---|
@@ -31,7 +31,7 @@ One event each time a session starts, a prompt is sent, a skill or subagent runs
 | `skill`, `tool_name` | `growisto-presentation`, `Skill` |
 | `folder_path`, `folder_name`, `repo` | working directory and git repo |
 | `cc_session_id`, `model`, `session_source` | session metadata |
-| `os`, `hook_version` | `linux`, `1.4.0` |
+| `os`, `hook_version` | `linux`, `2.1.0` |
 
 **The full text of a prompt is never recorded or transmitted.** Only the first 100 characters, plus the length. There is no field anywhere in the pipeline that could hold more — not in the hook, not in the spool file, not in GA4. Restoring full-prompt capture would mean editing the hook itself and shipping new binaries, which is the intended amount of friction.
 
@@ -48,7 +48,9 @@ The hook's only job on the critical path is appending one line to a local file, 
 
 `bin/growisto-hook` exists because a hook command is a string handed to a shell, not a path with arguments. It reads `uname` to derive an OS and CPU pair, execs the matching `bin/growisto-hook-<os>-<arch>` binary, and does nothing else of consequence. Four binaries are committed to the repo — linux-amd64, darwin-amd64, darwin-arm64, windows-amd64 — because `/plugin marketplace add` clones the repo and runs what it finds, with no build step it could trigger.
 
-The launcher being a bash script is a known weak point on Windows, not a settled decision. Claude Code runs a hook command through `sh -c` on Linux and macOS, and on Windows through Git Bash — falling back to PowerShell when Git Bash is not installed. Linux and macOS always have a shell that can run this. Windows does not: Git for Windows ships bash but puts it in `Git\bin`, which the default install leaves off `PATH`, so `bash` frequently does not resolve even on machines that have it. See Known limitations.
+The launcher being a bash script is a deliberate choice rather than an accepted risk, and the reasoning is worth stating because it looks like a dependency and isn't one. Claude Code runs a hook command through `sh -c` on Linux and macOS, and on Windows through Git Bash, falling back to PowerShell when Git Bash is absent. Installing this plugin means `/plugin marketplace add` cloning a private repository, so anyone who can install it has git — and on Windows a default Git for Windows install includes Git Bash. The set of machines that can install the plugin and the set that can run the launcher are the same set.
+
+What that does *not* cover is a machine with a bare `git.exe` and no Git Bash, or one where `bash` resolves to `C:\Windows\System32\bash.exe` — the WSL launcher, which is not a shell and fails without WSL installed. There the hook process never starts, and because every diagnostic in this system is written by code inside that process, the result is total silence: no log, no marker, and nothing for `/growisto-telemetry` to report. It is the one failure the plugin cannot describe about itself. See Known limitations.
 
 The binaries are Go, built with `CGO_ENABLED=0`, so they link nothing and need no runtime installed. `GROWISTO_TELEMETRY_BINARY` overrides the choice if you need to point at a local build.
 
@@ -97,6 +99,8 @@ cmd/growisto-hook/               all the logic; Go standard library only
   main.go                        config, dials, the four modes, exit-0 guarantee
   event.go                       identity, redaction, event shape, GA4 projection
   spool.go                       spool file, locking, background sender
+  options.go                     install-time userConfig values, NO_DEST diagnostic
+  dedupe.go                      suppress the same event seen twice in five seconds
   platform_unix.go               build-tagged: process liveness, detach, chmod
   platform_windows.go            build-tagged: OpenProcess, creation flags, icacls
   hook_test.go                   the test suite
@@ -104,7 +108,7 @@ bin/growisto-hook                cross-platform launcher
 bin/growisto-hook-<os>-<arch>    the committed binaries, four of them
 build.sh                         builds all four
 go.mod                           module definition; no dependencies
-.github/workflows/build.yml      rebuilds and commits bin/ on every push
+.github/workflows/build.yml      vets, tests, and checks bin/ is current; commits nothing
 commands/growisto-telemetry.md   the /growisto-telemetry status and repair command
 ```
 
@@ -130,7 +134,11 @@ go test ./...
 
 Only whoever edits the hook needs Go. Colleagues installing the plugin build nothing.
 
-The tests run in a temp directory, send no network traffic, and do not touch your real `~/.claude` or `~/.growisto-claude-telemetry` — every one of them repoints the data directory at `t.TempDir()` first. They cover the things that fail silently in production: the capture-mode dials resolving to the most private option on a typo, prompt previews never exceeding 100 characters or cutting a multi-byte character in half, redaction running before truncation, `PreToolUse` keeping the four skill tools and dropping everything else, internal bookkeeping fields never reaching the wire, and one corrupt spool line costing one event rather than the whole file.
+The tests run in a temp directory, send no network traffic, and do not touch your real `~/.claude` or `~/.growisto-claude-telemetry` — every one of them repoints the data directory at `t.TempDir()` first, and unsets any ambient `CLAUDE_PLUGIN_OPTION_*` variables, because the suite is usually run inside a Claude Code session where the real install has already exported live credentials.
+
+They cover the things that fail silently in production: the capture-mode dials resolving to the most private option on a typo, prompt previews never exceeding 100 characters or cutting a multi-byte character in half, redaction running before truncation, `PreToolUse` keeping the four skill tools and dropping everything else, internal bookkeeping fields never reaching the wire, and one corrupt spool line costing one event rather than the whole file.
+
+Two groups are newer. The install-time options are matched on a canonical spelling, so `GA4MEASUREMENTID`, `ga4-measurement-id`, and the `CLAUDE_PLUGIN_CONFIG_` prefix all resolve to the same setting, while an unprefixed `TEAM` in the environment is deliberately *not* adopted — `os.Getenv` is case-insensitive on Windows, so a bare lowercase candidate would silently pick up an unrelated variable on one platform only. And the `no GA4 destination` diagnostic is asserted to name the options it saw without ever writing their values, and to be written once rather than on every event. The duplicate-suppression tests assert that two occurrences of the same event produce the same fingerprint, that a repeat outside the five-second window is recorded (backdated with `os.Chtimes` rather than by sleeping), and that a clock moving backwards drops nothing.
 
 The platform split is the part worth knowing about. On POSIX the standard way to ask "is process N alive?" is `kill(pid, 0)`; on Windows that same call *terminates* the process, and Windows recycles PIDs. `platform_windows.go` uses `OpenProcess` plus `GetExitCodeProcess` instead, and treats access-denied as "exists, not ours". A naive port would have had telemetry killing unrelated programs.
 
@@ -138,9 +146,9 @@ The platform split is the part worth knowing about. On POSIX the standard way to
 
 **The binaries have never been executed.** Not on Windows, not anywhere. The Go code was written against the documented behaviour of `OpenProcess`, `GetExitCodeProcess`, `icacls`, and Git Bash and reviewed carefully, but reading code is not running it. Run `go test ./...` and a real install on each platform before trusting any of it.
 
-**Windows records nothing unless `bash` resolves.** This is the live one. The hook command is `bash "${CLAUDE_PLUGIN_ROOT}"/bin/growisto-hook`, and when Git Bash is not installed Claude Code hands that string to PowerShell, where `bash` is not a command. The hook fails to spawn, and because it never starts, none of the diagnostics inside it run — no log line, no `NO_BINARY` marker, no `pending events`. `/growisto-telemetry` cannot report it either. It is the worst failure mode in the system: total silence with no local evidence, on whichever machines happen to lack a tool nobody chose to lack.
+**Windows needs Git Bash, and says nothing if it is missing.** The hook command is `bash "${CLAUDE_PLUGIN_ROOT}"/bin/growisto-hook`, and Claude Code hands that string to Git Bash on Windows — falling back to PowerShell, where `bash` is not a command, when Git Bash is absent. This is an accepted dependency rather than an unmet one: installing the plugin means cloning a private repo, which needs git, and a default Git for Windows install includes Git Bash. See How it works.
 
-The fix is to stop going through a shell at all. A hook can be declared in exec form, with an `args` array instead of a `command` string, which Claude Code execs directly — no `sh`, no Git Bash, no PowerShell, no interpreter on any platform. That also makes the bash launcher deletable rather than portable. The open question is that `args` names one path while there are four binaries, so either extensionless exec resolves `growisto-hook` to `growisto-hook.exe` on Windows (one entry covers everything) or the hook is registered once per filename with duplicate suppression in the binary. Resolve that before rolling out to any Windows machine.
+What makes it worth listing anyway is the shape of the failure on a machine that slipped through — a bare `git.exe` with no Git Bash, or `bash` resolving to `C:\Windows\System32\bash.exe` without WSL installed. The hook process never starts, so none of the diagnostics inside it run: no log line, no `NO_BINARY` marker, no `pending events`, and nothing for `/growisto-telemetry` to report. Total silence with no local evidence. Confirm `where bash` prints a Git Bash path before rolling out to a Windows machine, and treat an empty data directory after a restart as this case rather than as a configuration problem.
 
 **A missing target is a silent gap by design.** The Python requirement that used to sit here is gone — the hook is a static binary, so there is no runtime to be absent. What replaced it is narrower: `build.sh` ships four targets and deliberately omits linux-arm64 and windows-arm64, so a Raspberry Pi or ARM server would record nothing. Unlike the Windows case above this one announces itself, because the launcher does run — it writes a `NO_BINARY` marker naming the target it wanted, and `/growisto-telemetry` reports it. The fix is one more line in `build.sh`.
 

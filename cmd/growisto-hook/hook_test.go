@@ -6,16 +6,44 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
 // isolate points every path in the program at a temporary directory for the
-// duration of one test. Without it the suite would write into the developer's
+// duration of one test, and clears the ambient plugin-option environment.
+//
+// The temporary directory is so the suite does not write into the developer's
 // real ~/.growisto-claude-telemetry and corrupt a live spool.
+//
+// The environment clearing matters for a less obvious reason: this suite is
+// quite likely to be run from inside a Claude Code session on a machine where
+// the plugin is installed, which means CLAUDE_PLUGIN_OPTION_GA4APISECRET and
+// friends are already exported. loadConfig reads those now, so without this the
+// tests would silently pick up the real credentials, and the option-spelling
+// tests below would depend on which of two matching variables Go happened to
+// visit first.
 func isolate(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("GROWISTO_TELEMETRY_DIR", dir)
+
+	for _, entry := range os.Environ() {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			continue
+		}
+		name, value := entry[:eq], entry[eq+1:]
+		for _, prefix := range optionPrefixes {
+			if len(name) > len(prefix) && strings.EqualFold(name[:len(prefix)], prefix) {
+				name, value := name, value
+				os.Unsetenv(name)
+				t.Cleanup(func() { os.Setenv(name, value) })
+				break
+			}
+		}
+	}
+
 	resolvePaths()
 	t.Cleanup(func() {
 		os.Unsetenv("GROWISTO_TELEMETRY_DIR")
@@ -530,5 +558,230 @@ func TestClientIDIsStable(t *testing.T) {
 	}
 	if second := stableClientID(); second != first {
 		t.Errorf("client id changed between calls: %q then %q", first, second)
+	}
+}
+
+// --------------------------------------------------------------------------
+// install-time option handling
+//
+// The failure these guard against is the worst one this plugin has: the
+// credentials never reach the binary, so it installs cleanly, reports nothing
+// wrong, and spools events forever. It has happened, which is why the matching
+// is deliberately loose and why that looseness needs bounding by tests.
+// --------------------------------------------------------------------------
+
+func TestPluginOptionIsFoundWhateverTheSpelling(t *testing.T) {
+	// Every spelling Claude Code might plausibly derive from the userConfig key
+	// `ga4MeasurementId`, plus the other prefix it has been seen to use.
+	for _, name := range []string{
+		"CLAUDE_PLUGIN_OPTION_GA4MEASUREMENTID",
+		"CLAUDE_PLUGIN_OPTION_GA4_MEASUREMENT_ID",
+		"CLAUDE_PLUGIN_OPTION_ga4MeasurementId",
+		"CLAUDE_PLUGIN_OPTION_GA4-MEASUREMENT-ID",
+		"CLAUDE_PLUGIN_CONFIG_ga4MeasurementId",
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t)
+			t.Setenv(name, "G-SPELLINGTEST")
+			if got := loadConfig().GA4MeasurementID; got != "G-SPELLINGTEST" {
+				t.Errorf("%s was not adopted: measurement id is %q", name, got)
+			}
+		})
+	}
+}
+
+func TestExplicitEnvironmentBeatsPluginOption(t *testing.T) {
+	isolate(t)
+	t.Setenv("CLAUDE_PLUGIN_OPTION_GA4MEASUREMENTID", "G-FROM-INSTALL")
+	t.Setenv("GROWISTO_TELEMETRY_GA4_MEASUREMENT_ID", "G-EXPLICIT")
+	if got := loadConfig().GA4MeasurementID; got != "G-EXPLICIT" {
+		t.Errorf("explicit environment lost to the install-time option: got %q", got)
+	}
+}
+
+func TestUnprefixedEnvironmentIsNotAdopted(t *testing.T) {
+	// os.Getenv is case-insensitive on Windows, so a bare `team` candidate would
+	// match an unrelated TEAM exported by any other tool -- on one platform only,
+	// discovered later from a dashboard nobody can explain. Nothing unprefixed is
+	// read for these fields, and this is what says so.
+	isolate(t)
+	t.Setenv("TEAM", "some-other-tools-idea-of-team")
+	t.Setenv("USER_EMAIL", "wrong@example.com")
+	cfg := loadConfig()
+	if cfg.Team != "" {
+		t.Errorf("adopted an unprefixed TEAM: %q", cfg.Team)
+	}
+	if cfg.UserEmail != "" {
+		t.Errorf("adopted an unprefixed USER_EMAIL: %q", cfg.UserEmail)
+	}
+}
+
+func TestNoDestinationIsRecordedOnceWithNamesNotValues(t *testing.T) {
+	dir := isolate(t)
+	const secret = "super-secret-write-credential"
+	t.Setenv("CLAUDE_PLUGIN_OPTION_GA4APISECRET", secret)
+	// Secret but no measurement id: configured enough to look fine, not enough
+	// to send anything. This is the half-configured case that GA4 answers 2xx to.
+	cfg := loadConfig()
+
+	warnIfNoDestination(cfg)
+
+	logged, err := os.ReadFile(filepath.Join(dir, "telemetry.log"))
+	if err != nil {
+		t.Fatalf("nothing was logged about having no destination: %v", err)
+	}
+	if !strings.Contains(string(logged), "ga4apisecret") {
+		t.Error("the log does not name the options that were visible, which is the only way to tell a naming mismatch from a missing install")
+	}
+	if strings.Contains(string(logged), secret) {
+		t.Fatal("the API secret was written to the log; it is a write credential for the analytics property")
+	}
+
+	// Once, not once per prompt.
+	before := len(logged)
+	warnIfNoDestination(cfg)
+	after, _ := os.ReadFile(filepath.Join(dir, "telemetry.log"))
+	if len(after) != before {
+		t.Error("the warning repeated; a hook that fires on every prompt would bury the rest of the log")
+	}
+
+	clearNoDestMarker()
+	if _, err := os.Stat(filepath.Join(dir, "NO_DEST")); err == nil {
+		t.Error("the marker survived clearNoDestMarker, so a machine fixed later would never warn again")
+	}
+}
+
+// --------------------------------------------------------------------------
+// duplicate suppression
+// --------------------------------------------------------------------------
+
+func promptPayload(prompt string) map[string]interface{} {
+	return map[string]interface{}{
+		"hook_event_name": "UserPromptSubmit",
+		"session_id":      "session-dedupe",
+		"cwd":             "/tmp/project",
+		"prompt":          prompt,
+	}
+}
+
+func TestDuplicateOccurrenceIsSuppressed(t *testing.T) {
+	isolate(t)
+	cfg := loadConfig()
+
+	first := buildEvent(promptPayload("run the migration"), cfg, false)
+	second := buildEvent(promptPayload("run the migration"), cfg, false)
+	if first == nil || second == nil {
+		t.Fatal("no event was built")
+	}
+
+	// The point of excluding ts_ms from the fingerprint. Two hook entries firing
+	// for one occurrence build their events milliseconds apart, so a fingerprint
+	// that included the timestamp would make every duplicate unique and the whole
+	// mechanism a no-op that still passed a naive test.
+	if fingerprint(first) != fingerprint(second) {
+		t.Fatal("two events for the same occurrence fingerprinted differently")
+	}
+
+	if alreadySeen(first) {
+		t.Error("the first occurrence was suppressed")
+	}
+	if !alreadySeen(second) {
+		t.Error("the duplicate was recorded; GA4 would double-count it")
+	}
+}
+
+func TestRepeatOutsideTheWindowIsRecorded(t *testing.T) {
+	dir := isolate(t)
+	cfg := loadConfig()
+	event := buildEvent(promptPayload("status"), cfg, false)
+
+	if alreadySeen(event) {
+		t.Fatal("the first occurrence was suppressed")
+	}
+
+	// Backdate the fingerprint rather than sleeping for the window. A test that
+	// takes five seconds to prove one thing gets skipped, and a skipped test is
+	// worse than no test because it looks like coverage.
+	path := filepath.Join(dir, "seen", fingerprint(event))
+	old := time.Now().Add(-2 * dedupeWindow)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("could not backdate the fingerprint: %v", err)
+	}
+
+	if alreadySeen(event) {
+		t.Error("somebody genuinely sending the same prompt again was swallowed")
+	}
+
+	// And it must be re-stamped, so the next duplicate is measured from now
+	// rather than from the first time this fingerprint was ever seen.
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("the fingerprint disappeared: %v", err)
+	}
+	if time.Since(st.ModTime()) > dedupeWindow {
+		t.Error("the fingerprint was not re-stamped, so suppression stops working for this shape of event")
+	}
+}
+
+func TestClockMovingBackwardsDoesNotDropEvents(t *testing.T) {
+	// A laptop waking in another timezone, or an NTP correction, can leave a
+	// fingerprint stamped in the future. Only the magnitude of the difference is
+	// meaningful; treating a future stamp as "just now" would suppress real
+	// events for as long as the skew lasted.
+	dir := isolate(t)
+	cfg := loadConfig()
+	event := buildEvent(promptPayload("deploy"), cfg, false)
+
+	if alreadySeen(event) {
+		t.Fatal("the first occurrence was suppressed")
+	}
+	path := filepath.Join(dir, "seen", fingerprint(event))
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatalf("could not set a future timestamp: %v", err)
+	}
+
+	if alreadySeen(event) {
+		t.Error("a fingerprint stamped in the future suppressed a real event")
+	}
+
+	// And the skewed stamp must be corrected on the way past, or every event of
+	// this shape keeps paying the same two-hour comparison until pruning removes
+	// it.
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("the fingerprint disappeared: %v", err)
+	}
+	if st.ModTime().After(time.Now().Add(dedupeWindow)) {
+		t.Error("the future timestamp was left in place")
+	}
+}
+
+func TestPruneSeenDropsOldFingerprintsOnly(t *testing.T) {
+	dir := isolate(t)
+	seen := filepath.Join(dir, "seen")
+	if err := os.MkdirAll(seen, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh := filepath.Join(seen, "fresh")
+	stale := filepath.Join(seen, "stale")
+	for _, path := range []string{fresh, stale} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * dedupeKeep)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	pruneSeen()
+
+	if _, err := os.Stat(stale); err == nil {
+		t.Error("an expired fingerprint survived; the directory would grow without bound")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Error("a fingerprint still inside the window was deleted, which reopens the double-counting gap")
 	}
 }

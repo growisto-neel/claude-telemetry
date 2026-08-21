@@ -509,6 +509,12 @@ func flush() {
 		return
 	}
 
+	// A destination exists, so any earlier complaint about not having one is
+	// stale. Cleared here rather than on the hook path because this runs once per
+	// flush instead of once per prompt, and because reaching this line is the
+	// best evidence available that configuration really did arrive.
+	clearNoDestMarker()
+
 	if !acquireLock() {
 		return
 	}
@@ -523,6 +529,10 @@ func flush() {
 	}()
 
 	recoverOrphans()
+	// Housekeeping for the duplicate-suppression directory. Here because it walks
+	// a directory, and the hook path must never do anything that scales with how
+	// long telemetry has been installed.
+	pruneSeen()
 	deadline := time.Now().Add(maxFlushDuration)
 	// Up to three passes: the second and third pick up anything appended while
 	// we were sending, so the tail of a session is not left waiting for the next

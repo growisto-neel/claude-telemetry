@@ -9,9 +9,10 @@
 # of the plugin needing no toolchain, no interpreter, and no network beyond the
 # clone itself.
 #
-# Nobody should have to run this by hand. .github/workflows/build.yml does it on
-# every push that touches the Go source and commits the result. Run it locally
-# only to test a change before pushing.
+# You do have to run this by hand, and commit the result alongside your source
+# change. CI used to rebuild and commit the binaries for you; that turned every
+# push into a binary merge conflict, which is how work gets silently lost, so it
+# was removed. The workflow now only fails the build if bin/ is older than cmd/.
 #
 # Usage:
 #   ./build.sh            # build every target
@@ -80,7 +81,13 @@ echo
 echo "git does not record the executable bit the way you might expect on every"
 echo "platform, so mark them explicitly before committing:"
 echo
-echo "  git add bin/ && git update-index --chmod=+x bin/growisto-hook-*"
+echo "  git add bin/ && git update-index --chmod=+x bin/growisto-hook*"
 echo
-echo "The launcher also chmods them at runtime if that is missed, but a correct"
-echo "mode in the tree is one less thing to go wrong quietly."
+echo "Note the pattern has no dash before the star. bin/growisto-hook -- the"
+echo "launcher, the file Claude Code actually runs -- is the one that matters"
+echo "most, and 'growisto-hook-*' does not match it. Without the executable bit"
+echo "the hook never starts, and because the launcher is what writes the log and"
+echo "the markers, there is nothing at all to notice."
+echo
+echo "The launcher chmods the binaries at runtime if that is missed, but it"
+echo "cannot chmod itself."

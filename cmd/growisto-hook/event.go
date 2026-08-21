@@ -248,8 +248,9 @@ var eventNameMap = map[string]string{
 // set of fields that can ever reach a destination is stated in one place where
 // it can be reviewed against the privacy notice.
 //
-// The two `_`-prefixed flags are internal bookkeeping and are stripped by
-// forSend before anything leaves the machine.
+// The `_`-prefixed field is internal bookkeeping. It is never part of the GA4
+// projection, which toGA4Payload builds field by field, so it cannot leave the
+// machine by accident: a field is only ever sent if someone adds it there.
 type Event struct {
 	SchemaVersion int    `json:"schema_version"`
 	EventName     string `json:"event_name"`

@@ -22,11 +22,17 @@ import (
 // So the match ignores case and separators, which is right for every spelling
 // rather than for one of them.
 //
-// This logic used to live in the bash launcher. It had to move here because the
-// launcher no longer runs everywhere: Claude Code execs the Windows binary
-// directly, with nothing in front of it. Anything the launcher did that the
-// binary depends on would have been silently absent on exactly the platform
-// that has been hardest to get working.
+// This logic used to live in the bash launcher, which exported the
+// GROWISTO_TELEMETRY_* names before running the binary. It moved here for two
+// reasons. The launcher's version needed `compgen` and `${!name}` indirection,
+// which are bash features rather than shell features, so it could not be made
+// portable without being rewritten. And environment matching is exactly the
+// kind of logic that should have tests, which a shell script embedded in a
+// plugin does not get.
+//
+// The launcher still runs on every platform and still picks the binary. It just
+// no longer touches these values: it passes its environment through, and the
+// CLAUDE_PLUGIN_OPTION_* variables arrive here untouched.
 
 // optionPrefixes are the environment prefixes Claude Code has used for
 // userConfig values. Both are checked rather than one, for the same reason the
